@@ -1,0 +1,19 @@
+# Virtualenv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets. Never commit these.
+.env
+
+# Generated data: the corpus (hundreds of MB of candles), the analogue
+# libraries built from it, and run artefacts. All reproducible:
+#   python scripts/build_corpus.py --years 8
+#   python main.py evidence build
+data/
+!data/.gitkeep
+logs/
+
+# Live account state -- positions, balances, pause timers.
+state*.json

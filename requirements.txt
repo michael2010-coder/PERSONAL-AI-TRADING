@@ -1,0 +1,7 @@
+ccxt>=4.4
+numpy>=1.24        # the analogue engine searches millions of situations
+PyYAML>=6.0
+requests>=2.31
+# Python 3.9 needs a cryptography build that still ships cp39 wheels.
+cryptography==44.0.2 ; python_version < "3.10"
+pytest>=8.0
