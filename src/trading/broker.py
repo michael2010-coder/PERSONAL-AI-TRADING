@@ -42,6 +42,10 @@ class Broker:
     def market_sell(self, symbol: str, qty: float) -> Fill:
         raise NotImplementedError
 
+    def balances(self) -> Dict[str, Dict[str, float]]:
+        """Every asset with a non-zero balance: {asset: {free, used, total}}."""
+        raise NotImplementedError
+
 
 class CcxtBroker(Broker):
     """Testnet or live, depending on `testnet`."""
@@ -67,6 +71,28 @@ class CcxtBroker(Broker):
         balance = self.exchange.fetch_balance()
         free = balance.get("free", {}).get(quote)
         return None if free is None else float(free)
+
+    def balances(self) -> Dict[str, Dict[str, float]]:
+        raw = self.exchange.fetch_balance()
+        out: Dict[str, Dict[str, float]] = {}
+        for asset, total in (raw.get("total") or {}).items():
+            if not total:
+                continue
+            out[asset] = {
+                "free": float((raw.get("free") or {}).get(asset) or 0.0),
+                "used": float((raw.get("used") or {}).get(asset) or 0.0),
+                "total": float(total),
+            }
+        return out
+
+    def price_of(self, asset: str, quote: str = "USDT") -> Optional[float]:
+        """What one unit of `asset` is worth in `quote`, or None if untradeable."""
+        if asset == quote:
+            return 1.0
+        try:
+            return self.price("{}/{}".format(asset, quote))
+        except Exception:
+            return None
 
     def market_buy(self, symbol: str, qty: float) -> Fill:
         return self._order(symbol, "buy", qty)
@@ -107,6 +133,17 @@ class PaperBroker(Broker):
 
     def free_quote_balance(self, symbol: str) -> Optional[float]:
         return self.balance
+
+    def balances(self) -> Dict[str, Dict[str, float]]:
+        return {"USDT": {"free": self.balance, "used": 0.0, "total": self.balance}}
+
+    def price_of(self, asset: str, quote: str = "USDT") -> Optional[float]:
+        if asset == quote:
+            return 1.0
+        try:
+            return self.price("{}/{}".format(asset, quote))
+        except Exception:
+            return None
 
     def market_buy(self, symbol: str, qty: float) -> Fill:
         price = self.price(symbol) * (1.0 + self.slippage)

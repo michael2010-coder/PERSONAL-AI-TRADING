@@ -440,6 +440,96 @@ Both `data/` and `logs/` are gitignored: the corpus and libraries are hundreds
 of megabytes and fully reproducible, and `state.*.json` holds your live
 balances. Nothing about your account is in the repository.
 
+## Funding it with BTC
+
+**The bot never holds your money.** There is no deposit address here, no
+wallet, no custody. Your funds sit in your own Binance account, and the bot
+holds an API key that may place trades and nothing else. That is the whole
+security model, and it is why there is no deposit system to build: "funding the
+bot" means funding your own exchange account.
+
+### The one thing that trips people up
+
+The strategy buys BTC **with** USDT. If you deposit BTC and stop there, the bot
+has nothing to spend -- it is already holding the asset it wants to buy. So:
+
+```
+BTC from your wallet  ->  Binance BTC address  ->  Convert to USDT  ->  bot trades BTC/USDT
+```
+
+`main.py balance` checks exactly this and tells you which step you are on.
+
+### Step by step
+
+1. **Deposit BTC.** Binance -> Wallet -> Deposit -> BTC. Copy the address, and
+   **match the network to the one you are sending from**. Native BTC sends to a
+   `bc1...`/`3...` address; BEP20 BTCB is a different chain with a different
+   address. Sending on the wrong network loses the coins permanently, and no
+   support ticket brings them back. Send a small test amount first.
+
+2. **Convert to USDT.** Wallet -> Convert -> BTC to USDT. Convert charges no
+   trading fee and has no order book to get wrong. Convert only what you intend
+   the bot to trade; keeping the rest as BTC is a position you are choosing to
+   hold, not something the bot manages.
+
+3. **Create a trade-only API key.** Binance -> API Management -> Create API.
+   - Enable **Spot Trading**.
+   - Leave **Withdrawals disabled**. This is the single most important setting
+     on this page. With it off, the worst case from a leaked key or a bug in
+     this code is a bad trade, not an emptied account.
+   - Restrict access to your VPS IP address.
+
+4. **Put the key on the box**, in `/opt/personal-ai-trading/.env`:
+
+   ```
+   BINANCE_API_KEY=...
+   BINANCE_API_SECRET=...
+   ```
+
+   `chmod 600 .env`. It is gitignored; keep it that way.
+
+5. **Confirm the bot can see the money:**
+
+   ```bash
+   .venv/bin/python main.py balance --mode live
+   ```
+
+   ```
+   binance account (live mode)
+     asset              free      value in USDT
+     USDT             420.00             420.00
+     total                               420.00
+
+   The bot is configured to trade 400.00 USDT.
+   Funded: 420.00 USDT free, which covers it.
+   ```
+
+   If you skipped the conversion it says so, values the BTC you are holding,
+   and points you at Convert.
+
+### How much to send
+
+`portfolio.initial_capital_usdt` (400 by default) is the **entire** budget the
+bot may ever touch. Send that plus a little slack for fees. Do not treat the
+account as a savings account with a bot attached -- deposit what you have
+decided you can lose, and keep the rest in your own wallet.
+
+Test on **testnet first**, where the money is fake: keys from
+[testnet.binance.vision](https://testnet.binance.vision), `crypto.mode: testnet`,
+and the same `balance` command works.
+
+### Paying for the VPS in crypto
+
+Hetzner and DigitalOcean both want a card. If you would rather pay in BTC:
+
+- **BitLaunch** -- funded with BTC, deploys DigitalOcean/Vultr/Linode servers,
+  so you still pick a Frankfurt or Amsterdam region.
+- **1984 Hosting** (Iceland) and **Njalla** both take BTC directly.
+
+Prices and payment policies at these change; check before committing. And note
+that paper mode runs on your own machine for free, which is where this should
+live until `main.py validate` stops returning FAIL.
+
 ## US stocks
 
 Informational only. Bamboo and Trove have no retail API, so nothing here can

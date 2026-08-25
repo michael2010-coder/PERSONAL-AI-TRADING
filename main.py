@@ -226,6 +226,81 @@ def cmd_trade(args, cfg) -> int:
     return 0
 
 
+def cmd_balance(args, cfg) -> int:
+    """What is actually in the exchange account, and can the bot use it?
+
+    The bot never custodies funds -- the money sits in your own exchange
+    account and the API key may trade it, nothing more. This reads that
+    account back so a deposit can be confirmed before anything is risked.
+    """
+    mode = args.mode or cfg.crypto.mode
+    quote = cfg.crypto.symbol.split("/")[-1]
+
+    if mode == "paper":
+        print("Paper mode holds imaginary money -- nothing to check.")
+        print("Set crypto.mode to testnet or live to read a real balance.")
+        return 0
+    if not cfg.crypto.has_credentials():
+        log.error("no API keys in .env (%s, %s)", cfg.crypto.api_key_env, cfg.crypto.api_secret_env)
+        return 2
+
+    broker = CcxtBroker(cfg.crypto.exchange, testnet=(mode == "testnet"),
+                        credentials=cfg.crypto.credentials(), fee_bps=cfg.crypto.fee_bps)
+    try:
+        holdings = broker.balances()
+    except Exception as exc:
+        log.error("could not read the account: %s", exc)
+        return 1
+
+    print("{} account ({} mode)".format(cfg.crypto.exchange, mode))
+    print("=" * 60)
+    if not holdings:
+        print("  empty -- nothing has been deposited yet")
+        return 1
+
+    print("  {:<8} {:>16} {:>16}".format("asset", "free", "value in " + quote))
+    print("  " + "-" * 42)
+    total_value = 0.0
+    quote_free = 0.0
+    other_value = 0.0
+    for asset, amounts in sorted(holdings.items(), key=lambda kv: -kv[1]["total"]):
+        price = broker.price_of(asset, quote)
+        value = None if price is None else amounts["total"] * price
+        if value is not None:
+            total_value += value
+            if asset == quote:
+                quote_free = amounts["free"]
+            else:
+                other_value += value
+        print("  {:<8} {:>16.8f} {:>16}".format(
+            asset, amounts["free"], "n/a" if value is None else "{:,.2f}".format(value)))
+    print("  " + "-" * 42)
+    print("  {:<8} {:>16} {:>16,.2f}".format("total", "", total_value))
+
+    print()
+    needed = cfg.portfolio.initial_capital_usdt
+    print("The bot is configured to trade {:,.2f} {}.".format(needed, quote))
+    if quote_free >= needed:
+        print("Funded: {:,.2f} {} free, which covers it.".format(quote_free, quote))
+        return 0
+
+    print("NOT ready: only {:,.2f} {} is free.".format(quote_free, quote))
+    if other_value > 0:
+        print()
+        print("You are holding {:,.2f} {} of value in other assets. The strategy buys"
+              .format(other_value, quote))
+        print("{} with {}, so it needs {} to spend -- holding {} instead means it has"
+              .format(cfg.crypto.symbol.split("/")[0], quote, quote,
+                      cfg.crypto.symbol.split("/")[0]))
+        print("nothing to buy with. Convert what you want it to trade into {}.".format(quote))
+        print()
+        print("On Binance: Wallet -> Convert, {} -> {}. No trading fee on Convert.".format(
+            [a for a in holdings if a != quote][:1][0] if len(holdings) > 1 else "BTC", quote))
+    print()
+    print("Or lower portfolio.initial_capital_usdt in config.yaml to what you actually have.")
+    return 1
+
+
 def cmd_status(args, cfg) -> int:
     mode = args.mode or cfg.crypto.mode
     path = args.state or os.path.join(ROOT, "state.{}.json".format(mode))
@@ -805,6 +880,10 @@ def parse_args(argv=None):
     t.add_argument(LIVE_FLAG, action="store_true",
                    help="required, with config mode: live, to trade real money")
     t.set_defaults(func=cmd_trade)
+
+    bal = sub.add_parser("balance", help="what is in the exchange account, and is it usable")
+    bal.add_argument("--mode", help="paper, testnet or live (default: config)")
+    bal.set_defaults(func=cmd_balance)
 
     st = sub.add_parser("status", help="portfolio, pauses and open positions")
     st.add_argument("--mode", help="which state file to read (paper/testnet/live)")
