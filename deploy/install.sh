@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Set up the trading bot on a fresh Debian/Ubuntu box.
 #
-#   curl -fsSL https://raw.githubusercontent.com/<you>/ai-trading-app/main/deploy/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/michael2010-coder/PERSONAL-AI-TRADING/main/deploy/install.sh | bash
 # or, from a clone:
 #   sudo bash deploy/install.sh
 #
@@ -9,8 +9,8 @@
 # whatever mode config.yaml says, and that ships as paper.
 set -euo pipefail
 
-REPO="${REPO:-https://github.com/michael2010-coder/ai-trading-app.git}"
-DEST="${DEST:-/opt/ai-trading-app}"
+REPO="${REPO:-https://github.com/michael2010-coder/PERSONAL-AI-TRADING.git}"
+DEST="${DEST:-/opt/personal-ai-trading}"
 USER_NAME="${USER_NAME:-trader}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -56,7 +56,7 @@ fi
 
 say "Installing the systemd service"
 cp "$DEST/deploy/ai-trading-bot.service" /etc/systemd/system/
-sed -i "s#/opt/ai-trading-app#${DEST}#g; s#User=trader#User=${USER_NAME}#; s#Group=trader#Group=${USER_NAME}#" \
+sed -i "s#/opt/personal-ai-trading#${DEST}#g; s#User=trader#User=${USER_NAME}#; s#Group=trader#Group=${USER_NAME}#" \
   /etc/systemd/system/ai-trading-bot.service
 systemctl daemon-reload
 

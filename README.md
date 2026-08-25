@@ -387,8 +387,8 @@ if you build the corpus there.
 
 ```bash
 # on a fresh Debian/Ubuntu box
-git clone https://github.com/michael2010-coder/ai-trading-app.git
-cd ai-trading-app
+git clone https://github.com/michael2010-coder/PERSONAL-AI-TRADING.git
+cd PERSONAL-AI-TRADING
 sudo bash deploy/install.sh
 ```
 
@@ -410,7 +410,7 @@ Building the corpus on the VPS takes about 30 minutes and 230 MB. Copying the
 one file the bot actually reads is faster:
 
 ```bash
-rsync -avz data/corpus/library_1h.npz root@<host>:/opt/ai-trading-app/data/corpus/
+rsync -avz data/corpus/library_1h.npz root@<host>:/opt/personal-ai-trading/data/corpus/
 ```
 
 State lives in `state.<mode>.json`, so a restart picks up an open position and

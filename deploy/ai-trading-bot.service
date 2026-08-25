@@ -8,7 +8,7 @@
 
 [Unit]
 Description=AI trading bot (rule-based, evidence-gated)
-Documentation=https://github.com/michael2010-coder/ai-trading-app
+Documentation=https://github.com/michael2010-coder/PERSONAL-AI-TRADING
 After=network-online.target
 Wants=network-online.target
 
@@ -16,10 +16,10 @@ Wants=network-online.target
 Type=simple
 User=trader
 Group=trader
-WorkingDirectory=/opt/ai-trading-app
+WorkingDirectory=/opt/personal-ai-trading
 
 # The bot reads keys from .env in the working directory. Keep it 0600.
-ExecStart=/opt/ai-trading-app/.venv/bin/python /opt/ai-trading-app/main.py trade
+ExecStart=/opt/personal-ai-trading/.venv/bin/python /opt/personal-ai-trading/main.py trade
 
 # Restart on crash, but back off so a persistent failure does not hammer the
 # exchange. StartLimit stops an endless crash loop.
@@ -50,7 +50,7 @@ RestrictNamespaces=true
 RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
-ReadWritePaths=/opt/ai-trading-app
+ReadWritePaths=/opt/personal-ai-trading
 
 [Install]
 WantedBy=multi-user.target
