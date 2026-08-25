@@ -20,6 +20,18 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+say "Checking this host can reach the exchange"
+if command -v curl >/dev/null 2>&1; then
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 https://api.binance.com/api/v3/ping || echo 000)
+  case "$code" in
+    200) echo "  api.binance.com reachable (HTTP 200)" ;;
+    451) echo "  HTTP 451: Binance blocks this region. Move to a non-US host" >&2
+         echo "  (Frankfurt, Helsinki, Amsterdam, Singapore, Tokyo all work)." >&2
+         exit 1 ;;
+    *)   echo "  WARNING: api.binance.com returned HTTP $code -- check firewall/region" >&2 ;;
+  esac
+fi
+
 say "Installing system packages"
 apt-get update -qq
 apt-get install -y -qq python3 python3-venv python3-pip git ca-certificates

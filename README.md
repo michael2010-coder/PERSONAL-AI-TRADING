@@ -381,9 +381,28 @@ the rest elsewhere.
 A laptop that sleeps is not a host, and this will not run on Vercel, Netlify or
 any serverless platform -- it is a long-running process that holds a position
 and a state file between polls, and a function that times out in seconds cannot
-do that. It wants a small always-on box: a $4-6/month VPS (Hetzner CX22,
-DigitalOcean, Fly machine) is plenty. It needs ~1 GB RAM, and ~500 MB of disk
-if you build the corpus there.
+do that. It wants a small always-on box.
+
+**Where to host it**
+
+| | |
+| --- | --- |
+| Recommended | Hetzner CX22, Falkenstein or Helsinki -- about EUR 3.79/mo |
+| Simpler alternative | DigitalOcean $6 droplet, Frankfurt or Amsterdam |
+| Free, with caveats | Oracle Cloud Always Free ARM instance, Frankfurt |
+
+**Not the United States.** Binance geo-blocks US IP addresses and answers with
+HTTP 451, so a US-region box fails every API call however well the bot is
+configured. Frankfurt, Helsinki, Amsterdam, Singapore and Tokyo all work. The
+same goes for anywhere you do not control the egress region -- which is the
+second, independent reason serverless platforms are unsuitable here.
+
+The first thing to run on a new box is `main.py check`: it fetches a live
+ticker, so a geo-block or a firewall problem shows up immediately rather than
+at the first trade.
+
+Sizing: 1 vCPU and 1 GB RAM is plenty. Disk depends on whether you build the
+corpus there (~500 MB) or copy just the library the bot reads (54 MB).
 
 ```bash
 # on a fresh Debian/Ubuntu box
