@@ -1,0 +1,56 @@
+# Systemd unit for the trading loop.
+#
+#   sudo cp deploy/ai-trading-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ai-trading-bot
+#
+# Edit User/WorkingDirectory below if you did not follow deploy/install.sh.
+
+[Unit]
+Description=AI trading bot (rule-based, evidence-gated)
+Documentation=https://github.com/michael2010-coder/ai-trading-app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ai-trading-app
+
+# The bot reads keys from .env in the working directory. Keep it 0600.
+ExecStart=/opt/ai-trading-app/.venv/bin/python /opt/ai-trading-app/main.py trade
+
+# Restart on crash, but back off so a persistent failure does not hammer the
+# exchange. StartLimit stops an endless crash loop.
+Restart=always
+RestartSec=30
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+# A restart must not lose an open position: state lives in state.<mode>.json
+# and is reloaded on boot. Give it time to finish a poll before killing it.
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-trading-bot
+
+# Hardening. The bot needs outbound HTTPS and its own directory; nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/opt/ai-trading-app
+
+[Install]
+WantedBy=multi-user.target

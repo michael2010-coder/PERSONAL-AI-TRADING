@@ -378,15 +378,48 @@ the rest elsewhere.
 
 ### Running it continuously
 
-A laptop that sleeps is not a host. For 24/7 operation put it on a small VPS:
+A laptop that sleeps is not a host, and this will not run on Vercel, Netlify or
+any serverless platform -- it is a long-running process that holds a position
+and a state file between polls, and a function that times out in seconds cannot
+do that. It wants a small always-on box: a $4-6/month VPS (Hetzner CX22,
+DigitalOcean, Fly machine) is plenty. It needs ~1 GB RAM, and ~500 MB of disk
+if you build the corpus there.
 
 ```bash
-.venv/bin/python main.py trade            # foreground, logs to logs/trading.log
+# on a fresh Debian/Ubuntu box
+git clone https://github.com/michael2010-coder/ai-trading-app.git
+cd ai-trading-app
+sudo bash deploy/install.sh
+```
+
+That installs Python, creates a `trader` system user, builds the virtualenv,
+runs the tests, and installs [deploy/ai-trading-bot.service](deploy/ai-trading-bot.service).
+It deliberately does **not** start trading. The script prints the next steps:
+build the corpus, run `check` and `plan`, get a passing `validate`, then
+
+```bash
+sudo systemctl enable --now ai-trading-bot
+journalctl -u ai-trading-bot -f
+```
+
+The service restarts on crash with a 30-second backoff, and gives up after 5
+failures in 10 minutes rather than hammering the exchange. It stops with SIGINT
+and 60 seconds of grace, so a deploy never kills the process mid-order.
+
+Building the corpus on the VPS takes about 30 minutes and 230 MB. Copying the
+one file the bot actually reads is faster:
+
+```bash
+rsync -avz data/corpus/library_1h.npz root@<host>:/opt/ai-trading-app/data/corpus/
 ```
 
 State lives in `state.<mode>.json`, so a restart picks up an open position and
 the day's realised PnL instead of losing track of both. Orders are journalled
-to `logs/orders.jsonl`.
+to `logs/orders.jsonl`, and `main.py status` reads all of it back.
+
+Both `data/` and `logs/` are gitignored: the corpus and libraries are hundreds
+of megabytes and fully reproducible, and `state.*.json` holds your live
+balances. Nothing about your account is in the repository.
 
 ## US stocks
 
