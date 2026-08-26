@@ -480,11 +480,7 @@ def cmd_validate(args, cfg) -> int:
         "at": _now_iso(), "passed": passed, "reasons": reasons, "windows": rows,
         "average_return_pct": average, "worst_drawdown_pct": worst_dd,
         "total_trades": total_trades, "timeframe": timeframe,
-        "config": {"stop_loss_pct": cfg.risk.stop_loss_pct,
-                   "take_profit_pct": cfg.risk.take_profit_pct,
-                   "min_similar_situations": cfg.evidence.min_similar_situations,
-                   "min_success_rate": cfg.evidence.min_success_rate,
-                   "evidence_enabled": gate is not None},
+        "config": _validated_shape(cfg, gate is not None),
     }
     os.makedirs(os.path.dirname(_validation_path()), exist_ok=True)
     with open(_validation_path(), "w") as fh:
@@ -501,6 +497,29 @@ def cmd_validate(args, cfg) -> int:
     print()
     print("Written to {}".format(_validation_path()))
     return 0 if passed else 1
+
+
+def _validated_shape(cfg, evidence_enabled: bool) -> dict:
+    """Everything that would change the result if it changed.
+
+    A validation is only evidence about the settings it actually ran. Recording
+    the stop and target alone once let a PASS earned on the 4h configuration
+    unlock live trading for the 1h one, which loses money.
+    """
+    return {
+        "timeframe": cfg.crypto.timeframe,
+        "stop_loss_pct": cfg.risk.stop_loss_pct,
+        "take_profit_pct": cfg.risk.take_profit_pct,
+        "max_position_size_pct": cfg.risk.max_position_size_pct,
+        "buy_threshold": cfg.strategy.buy_threshold,
+        "sell_threshold": cfg.strategy.sell_threshold,
+        "fee_bps": cfg.crypto.fee_bps,
+        "slippage_bps": cfg.crypto.slippage_bps,
+        "evidence_enabled": evidence_enabled,
+        "min_similar_situations": cfg.evidence.min_similar_situations,
+        "min_success_rate": cfg.evidence.min_success_rate,
+        "evidence_library": cfg.evidence.library,
+    }
 
 
 def _now_iso() -> str:
@@ -528,10 +547,23 @@ def _validation_blocks_live(cfg, max_age_days: float = 30.0):
     age_days = (datetime.now(timezone.utc) - when).total_seconds() / 86_400.0
     if age_days > max_age_days:
         return "the last validation is {:.0f} days old (limit {:.0f})".format(age_days, max_age_days)
-    stored = verdict.get("config", {})
-    if abs(stored.get("take_profit_pct", -1) - cfg.risk.take_profit_pct) > 1e-9 or \
-       abs(stored.get("stop_loss_pct", -1) - cfg.risk.stop_loss_pct) > 1e-9:
-        return "the settings changed since the last validation -- re-run it"
+    stored = verdict.get("config") or {}
+    current = _validated_shape(cfg, verdict.get("config", {}).get("evidence_enabled", True))
+    drifted = []
+    for key, value in current.items():
+        if key == "evidence_enabled":
+            continue
+        was = stored.get(key)
+        if was is None:
+            drifted.append("{} was not recorded".format(key))
+        elif isinstance(value, float) and isinstance(was, (int, float)):
+            if abs(float(was) - value) > 1e-9:
+                drifted.append("{}: validated {}, now {}".format(key, was, value))
+        elif was != value:
+            drifted.append("{}: validated {!r}, now {!r}".format(key, was, value))
+    if drifted:
+        return ("the settings changed since the last validation ({}) -- re-run it"
+                .format("; ".join(drifted[:3])))
     return None
 
 

@@ -160,11 +160,15 @@ def test_changing_the_risk_settings_invalidates_the_validation(tmp_path, monkeyp
     assert "settings changed" in cli._validation_blocks_live(cfg)
 
 
-def test_a_recent_matching_pass_clears_live(tmp_path, monkeypatch):
+def test_a_partial_validation_record_fails_closed(tmp_path, monkeypatch):
+    """An old record that only captured the stop and target is not proof about
+    the timeframe, the threshold or the evidence gate. Refuse it."""
     cfg = load_config(os.path.join(cli.ROOT, "config.yaml"))
     _write_validation(tmp_path, monkeypatch, _passing(
         {"stop_loss_pct": cfg.risk.stop_loss_pct, "take_profit_pct": cfg.risk.take_profit_pct}))
-    assert cli._validation_blocks_live(cfg) is None
+    blocker = cli._validation_blocks_live(cfg)
+    assert blocker is not None
+    assert "not recorded" in blocker
 
 
 def test_live_is_refused_when_validation_fails_even_with_the_flag_and_keys(
@@ -178,3 +182,34 @@ def test_live_is_refused_when_validation_fails_even_with_the_flag_and_keys(
     assert cli.main(["--config", path, "trade", "--once",
                      "--i-understand-this-is-live"]) == 2
     assert "refusing to trade live" in caplog.text
+
+
+def test_a_pass_earned_on_one_config_does_not_unlock_a_different_one(tmp_path, monkeypatch):
+    """The bug this guards: validate on the profitable 4h settings, then run the
+    losing 1h settings live because the stop and target happened to match."""
+    cfg = load_config(os.path.join(cli.ROOT, "config.yaml"))
+    validated = cli._validated_shape(cfg, True)
+    validated["timeframe"] = "4h"           # the pass was earned on 4h
+    validated["buy_threshold"] = 2.0
+    _write_validation(tmp_path, monkeypatch, {"at": _passing()["at"], "passed": True,
+                                              "reasons": [], "config": validated})
+    blocker = cli._validation_blocks_live(cfg)
+    assert blocker is not None
+    assert "timeframe" in blocker
+
+
+def test_an_exact_match_still_clears(tmp_path, monkeypatch):
+    cfg = load_config(os.path.join(cli.ROOT, "config.yaml"))
+    _write_validation(tmp_path, monkeypatch,
+                      {"at": _passing()["at"], "passed": True, "reasons": [],
+                       "config": cli._validated_shape(cfg, True)})
+    assert cli._validation_blocks_live(cfg) is None
+
+
+def test_turning_the_evidence_gate_down_invalidates_the_pass(tmp_path, monkeypatch):
+    cfg = load_config(os.path.join(cli.ROOT, "config.yaml"))
+    validated = cli._validated_shape(cfg, True)
+    validated["min_success_rate"] = 0.34
+    _write_validation(tmp_path, monkeypatch, {"at": _passing()["at"], "passed": True,
+                                              "reasons": [], "config": validated})
+    assert "min_success_rate" in cli._validation_blocks_live(cfg)

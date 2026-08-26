@@ -440,6 +440,109 @@ Both `data/` and `logs/` are gitignored: the corpus and libraries are hundreds
 of megabytes and fully reproducible, and `state.*.json` holds your live
 balances. Nothing about your account is in the repository.
 
+## Can it go live?
+
+The short version: **one configuration now passes validation, and it still is
+not worth funding.** Both halves of that matter, so here is the work.
+
+### Where the money was actually going
+
+Re-running the same year with fees and slippage set to zero:
+
+| | Return |
+| --- | --- |
+| With real costs | -3.74% |
+| With zero costs | **-0.29%** |
+
+**Costs were 92% of the loss.** The strategy was not picking badly -- gross it
+was flat, a coin flip. It lost because it turned over 12x the account per year
+at ~0.3% a round trip. That reframed the work: stop hunting for a big edge,
+stop paying 3.4% a year in friction.
+
+### Cutting the friction
+
+Trading a slower timeframe and assuming limit rather than market orders took
+the same strategy from -3.74% to **-0.18%**. Across a 48-configuration sweep
+(2 timeframes x 3 signal thresholds x 4 stop/target pairs x 2 cost models, 5
+markets, one year each) **not one configuration was profitable.** Cost work
+alone gets you to break-even, never past it.
+
+### Finding the one thing that was not noise
+
+4h was the only place the analogue engine ever measured a real lift (34.0%
+against a 32.1% base rate, confidence interval clear of it). Gating entries on
+*beating the base rate* -- rather than an absolute 80% -- is the version of
+your requirement that has any chance, so that is what was tested.
+
+Parameters were chosen on **2019-2025** data and then run on data never used to
+choose them:
+
+| Window | Return |
+| --- | --- |
+| Train: 5 majors, 6 years to 1 year ago | +0.64% |
+| Test: same 5 majors, last year | +0.38% |
+| Test: **6 symbols never used in selection**, last year | +1.04% |
+| Test: those unseen symbols, the older era | +0.22% |
+
+The sign held everywhere, including on symbols the parameters had never seen.
+That is the strongest result in this repository.
+
+`main.py validate` on [config.4h.yaml](config.4h.yaml), with honest taker costs
+(10bps fee, 5bps slippage -- what the bot actually pays placing market orders),
+across 11 markets:
+
+```
+windows profitable   8/11
+average return       +0.24%
+worst drawdown       -2.52%
+trades taken         263
+
+PASS -- these settings made money across the windows tested.
+```
+
+### Why you still should not fund it
+
+**+0.24% a year on 400 USDT is 96 cents.**
+
+A VPS to run it costs $48-72 a year. Hosting is **50 to 75 times** the expected
+profit. Running this live is a guaranteed loss that has nothing to do with the
+strategy being wrong -- the edge is simply smaller than the electricity bill.
+
+And 0.24% is inside the noise of things this backtest does not model: exchange
+downtime, partial fills, the spread widening when you actually need it, a
+listing being delisted mid-position. An edge needs to be big enough to survive
+the modelling error, and this one is not.
+
+Scaling does not rescue it either, because the edge is a percentage: 4,000 USDT
+returns about 9.60 a year, 40,000 returns about 96. You would need roughly 20x
+this edge before the hosting cost stops dominating.
+
+### What would change the answer
+
+An edge of 5-10% a year, not 0.24%. That means better features for the analogue
+engine (higher-timeframe context, regime, time of day, cross-asset correlation),
+or a genuinely different signal -- not more parameter tuning on these nine
+features, which is now thoroughly explored and lands at zero.
+
+Everything needed to test that is built: a 4.3M-bar corpus, a labelled library
+with no-lookahead queries, a backtester that agrees with the live engine, and a
+validator with held-out windows that will tell you the truth. Use them on a new
+idea rather than re-tuning this one.
+
+### If you want to run it anyway
+
+Do it on **testnet**, which costs nothing and proves the whole pipeline:
+
+```bash
+# keys from testnet.binance.vision, then
+.venv/bin/python main.py --config config.4h.yaml balance --mode testnet
+.venv/bin/python main.py --config config.4h.yaml trade
+```
+
+`config.4h.yaml` is the validated configuration. The default `config.yaml`
+remains the 1h/80% setup, which is documented above and loses money -- it is
+kept because it is the honest record of what was asked for and what happened.
+
 ## Funding it with BTC
 
 **The bot never holds your money.** There is no deposit address here, no

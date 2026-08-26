@@ -107,3 +107,17 @@ def test_thresholds_move_the_call():
 def test_unknown_strategy_keys_are_rejected():
     with pytest.raises(ValueError):
         StrategyParams.from_dict({"ema_fastt": 5})
+
+
+def test_the_cached_and_uncached_paths_agree_exactly():
+    """prepare() must be a pure speedup, never a change in behaviour."""
+    candles = synthetic(bars=400, seed=23, drift=0.0003, volatility=0.015)
+    s = Strategy()
+    cache = s.prepare(candles)
+    for i in range(s.warmup_bars, len(candles), 7):
+        slow = s.evaluate(candles, i)
+        fast = s.evaluate(candles, i, cache=cache)
+        assert fast.action == slow.action
+        assert fast.score == pytest.approx(slow.score)
+        assert fast.votes == pytest.approx(slow.votes)
+        assert fast.reasons == slow.reasons

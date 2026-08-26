@@ -221,6 +221,9 @@ class Backtester:
         if self.evidence is not None:
             situations, situations_valid = feature_matrix(candles)
 
+        # One indicator pass for the whole run instead of one per bar.
+        cache = self.strategy.prepare(candles)
+
         evidence_blocked = 0
         evidence_passed = 0
         supervisor_blocks = 0
@@ -323,7 +326,7 @@ class Backtester:
                         kill_days.append(day)
 
             # 3. Decide from this bar's close; it fills next bar.
-            signal = self.strategy.evaluate(candles, i)
+            signal = self.strategy.evaluate(candles, i, cache=cache)
             signals_seen[signal.action] = signals_seen.get(signal.action, 0) + 1
             if on_signal is not None:
                 on_signal(i, signal, position)

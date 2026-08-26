@@ -27,6 +27,23 @@ class Candle:
 
 
 @dataclass
+class IndicatorCache:
+    """Indicator series for a whole run, computed once.
+
+    Every indicator here is causal -- the value at bar i depends only on bars
+    0..i (proven in tests/test_indicators.py) -- so reading position i out of a
+    full-series computation is identical to recomputing from scratch with only
+    bars 0..i available. tests/test_strategy.py asserts that equivalence
+    directly. What changes is the cost: O(n) for a run instead of O(n^2).
+    """
+    ema_fast: List[Optional[float]]
+    ema_slow: List[Optional[float]]
+    rsi: List[Optional[float]]
+    macd_hist: List[Optional[float]]
+    volume_sma: List[Optional[float]]
+
+
+@dataclass
 class Signal:
     action: str
     score: float
@@ -84,8 +101,31 @@ class Strategy:
             p.volume_period,
         ) + 1
 
-    def evaluate(self, candles: Sequence[Candle], index: Optional[int] = None) -> Signal:
-        """Signal for `index` (default: the last candle) using bars 0..index only."""
+    def prepare(self, candles: Sequence[Candle]) -> IndicatorCache:
+        """Compute every series once, for a backtest that walks the whole run."""
+        p = self.p
+        closes = [c.close for c in candles]
+        volumes = [c.volume for c in candles]
+        _, _, hist = indicators.macd(closes, p.macd_fast, p.macd_slow, p.macd_signal)
+        return IndicatorCache(
+            ema_fast=indicators.ema(closes, p.ema_fast),
+            ema_slow=indicators.ema(closes, p.ema_slow),
+            rsi=indicators.rsi(closes, p.rsi_period),
+            macd_hist=hist,
+            volume_sma=indicators.sma(volumes, p.volume_period),
+        )
+
+    def evaluate(
+        self,
+        candles: Sequence[Candle],
+        index: Optional[int] = None,
+        cache: Optional[IndicatorCache] = None,
+    ) -> Signal:
+        """Signal for `index` (default: the last candle) using bars 0..index only.
+
+        Pass `cache` from prepare() to reuse one full-series computation across
+        a run; the result is identical either way.
+        """
         if not candles:
             raise ValueError("no candles supplied")
         i = len(candles) - 1 if index is None else index
@@ -93,19 +133,27 @@ class Strategy:
             raise IndexError("index out of range")
 
         p = self.p
-        window = candles[: i + 1]
-        closes = [c.close for c in window]
-        volumes = [c.volume for c in window]
+        if cache is None:
+            window = candles[: i + 1]
+            closes = [c.close for c in window]
+            volumes = [c.volume for c in window]
+            ema_fast = indicators.ema(closes, p.ema_fast)[i]
+            ema_slow = indicators.ema(closes, p.ema_slow)[i]
+            rsi_series = indicators.rsi(closes, p.rsi_period)
+            _, _, hist = indicators.macd(closes, p.macd_fast, p.macd_slow, p.macd_signal)
+            vol_sma = indicators.sma(volumes, p.volume_period)[i]
+        else:
+            volumes = [candles[i].volume]
+            ema_fast = cache.ema_fast[i]
+            ema_slow = cache.ema_slow[i]
+            rsi_series = cache.rsi
+            hist = cache.macd_hist
+            vol_sma = cache.volume_sma[i]
 
-        ema_fast = indicators.ema(closes, p.ema_fast)[i]
-        ema_slow = indicators.ema(closes, p.ema_slow)[i]
-        rsi_series = indicators.rsi(closes, p.rsi_period)
         rsi_now = rsi_series[i]
         rsi_prev = rsi_series[i - 1] if i > 0 else None
-        _, _, hist = indicators.macd(closes, p.macd_fast, p.macd_slow, p.macd_signal)
         hist_now = hist[i]
         hist_prev = hist[i - 1] if i > 0 else None
-        vol_sma = indicators.sma(volumes, p.volume_period)[i]
 
         votes: Dict[str, float] = {}
         reasons: List[str] = []
@@ -152,11 +200,12 @@ class Strategy:
             confirmed = not p.require_volume_confirmation
             reasons.append("volume SMA{} unavailable".format(p.volume_period))
         else:
-            ratio = volumes[i] / vol_sma
+            volume_now = candles[i].volume
+            ratio = volume_now / vol_sma
             confirmed = ratio >= p.volume_factor
             reasons.append(
                 "volume {:.4g} vs SMA{} {:.4g} = {:.2f}x (need {:.2f}x) -> {}".format(
-                    volumes[i], p.volume_period, vol_sma, ratio, p.volume_factor,
+                    volume_now, p.volume_period, vol_sma, ratio, p.volume_factor,
                     "confirmed" if confirmed else "not confirmed",
                 )
             )
