@@ -1,0 +1,101 @@
+# Bybit testnet: real exchange mechanics, fake money.
+# Keys from https://testnet.bybit.com -> API Management.
+# Note: Bybit testnet runs its own price series, which drifts from the real
+# market (74,510 vs 77,398 when this was written). Fine for testing the
+# software, meaningless for judging the strategy.
+# Same settings as config.4h.yaml, which is the validated configuration.
+# ---------------------------------------------------------------------------
+# Trading behaviour. Secrets live in .env, never here.
+# Read README.md "Going live" before changing crypto.mode.
+# ---------------------------------------------------------------------------
+
+crypto:
+  exchange: bybit          # any ccxt id with a sandbox, e.g. binance, bybit
+  mode: testnet              # testnet (fake money) | paper (no keys) | live (real money)
+  symbol: BTC/USDT
+  timeframe: 4h
+  poll_seconds: 60
+  api_key_env: BYBIT_API_KEY
+  api_secret_env: BYBIT_API_SECRET
+  fee_bps: 10                # 0.10% taker
+  slippage_bps: 5            # 0.05% assumed slippage per fill
+
+risk:
+  # Kept in step with portfolio.initial_capital_usdt below. Once the bot is
+  # running, the portfolio is the source of truth: sizing follows the trading
+  # balance as it grows or shrinks.
+  allocated_capital_usdt: 400.0   # the only money this bot may ever touch
+  max_position_size_pct: 10.0     # per position, as % of allocated capital
+  stop_loss_pct: 2.0              # set at entry, on every position
+  take_profit_pct: 4.0
+  max_open_positions: 1
+  max_daily_loss_pct: 5.0         # trips the kill-switch until UTC midnight
+  reentry_cooldown_bars: 3        # sit out this many bars after closing a position
+  min_notional_usdt: 10.0         # exchange minimum
+  max_notional_pct_of_balance: 100.0
+
+strategy:
+  ema_fast: 12
+  ema_slow: 26
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  volume_period: 20
+  volume_factor: 1.0              # entry needs volume >= 1.0x its 20-bar average
+  buy_threshold: 2.0              # sum of votes needed to call BUY
+  sell_threshold: -1.0
+  require_volume_confirmation: true
+
+# ---------------------------------------------------------------------------
+# The account. This is the anti-greed layer: position size never grows because
+# the last trade won, compounding is capped, and profit is locked away in steps
+# where the bot cannot reach it.
+# ---------------------------------------------------------------------------
+portfolio:
+  initial_capital_usdt: 400.0
+  compounding: capped           # off | capped | full
+  compounding_cap_pct: 50.0     # trading balance may grow to 600, no further
+  profit_lock_step_usdt: 50.0   # every +50 realised ...
+  profit_lock_share_pct: 50.0   # ... 25 moves to the untouchable reserve
+  max_total_drawdown_pct: 20.0  # -20% from peak equity stops trading for good
+
+# ---------------------------------------------------------------------------
+# When to pause, and when to start again. Every pause has a resume time.
+# ---------------------------------------------------------------------------
+supervisor:
+  enabled: true
+  max_consecutive_losses: 3     # then pause
+  loss_streak_pause_hours: 12
+  weekly_loss_pct: 8.0          # of capital, then pause for
+  weekly_pause_days: 3
+  daily_profit_target_pct: 2.0  # up this much today -> stop while ahead
+  max_trades_per_day: 4         # churn is a cost, not a strategy
+  stale_data_minutes: 30        # data older than this -> pause, do not guess
+  max_error_streak: 5
+  error_streak_pause_minutes: 15
+  max_volatility_pct: 5.0       # ATR above this share of price -> sit it out
+
+# ---------------------------------------------------------------------------
+# Evidence gate: before any entry, ask what happened the last N times a
+# situation like this one appeared. Requires a built library --
+#   python scripts/build_corpus.py --years 8 && python main.py evidence build
+# The gate gates ENTRIES only; exits, stops and the kill-switch are never
+# blocked by it.
+# ---------------------------------------------------------------------------
+evidence:
+  enabled: true
+  min_similar_situations: 1000  # nearest historical analogues to consult
+  min_success_rate: 0.34          # of those, the share that must have worked
+  horizon_bars: 48                # bars allowed to reach target before stop
+  max_distance: null              # optional cap on how far a match may be
+  confidence_z: 1.96              # gate on the 95% lower bound, not the raw rate
+  library: data/corpus/library_4h.npz   # build one per timeframe you trade
+
+stocks:
+  enabled: true
+  symbols: [AAPL, MSFT, NVDA]
+  interval: 1d
+  lookback_days: 365

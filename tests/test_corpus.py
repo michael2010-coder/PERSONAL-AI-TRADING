@@ -89,3 +89,16 @@ def test_inventory_counts_bars_per_series(tmp_path):
 def test_an_empty_corpus_directory_reports_nothing_rather_than_failing(tmp_path):
     assert corpus.inventory(str(tmp_path / "missing")) == []
     assert corpus.total_bars(str(tmp_path / "missing")) == 0
+
+
+def test_exchanges_are_pinned_to_spot_markets():
+    """This app has no concept of leverage or liquidation.
+
+    ccxt defaults Bybit (and others) to perpetual swaps, where the same symbol
+    is a leveraged contract that can lose far more than the configured stop.
+    """
+    from trading.data import make_exchange
+
+    for exchange_id in ("binance", "bybit"):
+        exchange = make_exchange(exchange_id, testnet=False)
+        assert exchange.options.get("defaultType") == "spot", exchange_id

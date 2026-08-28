@@ -40,7 +40,15 @@ def make_exchange(exchange_id: str, testnet: bool = True, credentials: Optional[
 
     if not hasattr(ccxt, exchange_id):
         raise ValueError("ccxt has no exchange {!r}".format(exchange_id))
-    opts = {"enableRateLimit": True, "timeout": 30_000}
+    # This app is spot-only and long-only: it has no concept of leverage,
+    # margin or liquidation. Several exchanges (Bybit among them) default to
+    # perpetual swaps in ccxt, where the same symbol means a leveraged
+    # contract that can lose far more than the configured stop. Pin it.
+    opts = {
+        "enableRateLimit": True,
+        "timeout": 30_000,
+        "options": {"defaultType": "spot"},
+    }
     if credentials:
         opts.update({k: v for k, v in credentials.items() if v})
     exchange = getattr(ccxt, exchange_id)(opts)
