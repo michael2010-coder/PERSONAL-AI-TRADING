@@ -531,12 +531,15 @@ idea rather than re-tuning this one.
 
 ### If you want to run it anyway
 
-Do it on **testnet**, which costs nothing and proves the whole pipeline:
+Do it on **testnet**, which costs nothing and proves the whole pipeline.
+[docs/TESTNET.md](docs/TESTNET.md) is the runbook, including what to try to
+break and how to know when the run is finished:
 
 ```bash
 # keys from testnet.binance.vision, then
-.venv/bin/python main.py --config config.4h.yaml balance --mode testnet
-.venv/bin/python main.py --config config.4h.yaml trade
+.venv/bin/python main.py --config config.testnet.yaml balance --mode testnet
+.venv/bin/python main.py --config config.testnet.yaml trade --once --dry-run
+.venv/bin/python main.py --config config.testnet.yaml trade --symbol BTC/USDT
 ```
 
 `config.4h.yaml` is the validated configuration. The default `config.yaml`

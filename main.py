@@ -187,16 +187,26 @@ def cmd_trade(args, cfg) -> int:
         if args.i_understand_this_is_live:
             log.warning("%s passed, but config.yaml still says mode: testnet. Staying on testnet.", LIVE_FLAG)
         if not cfg.crypto.has_credentials():
-            log.error("testnet mode needs testnet keys in .env (%s, %s). "
-                      "Use `mode: paper` to run with no keys at all.",
-                      cfg.crypto.api_key_env, cfg.crypto.api_secret_env)
-            return 2
+            if not args.dry_run:
+                log.error("testnet mode needs testnet keys in .env (%s, %s). "
+                          "Use `mode: paper` to run with no keys at all.",
+                          cfg.crypto.api_key_env, cfg.crypto.api_secret_env)
+                return 2
+            # --dry-run places no orders, so the whole decision path can be
+            # exercised against testnet's public data before any key exists.
+            log.warning("no testnet keys yet -- dry run against public data only")
         broker = CcxtBroker(cfg.crypto.exchange, testnet=True,
                             credentials=cfg.crypto.credentials(), fee_bps=cfg.crypto.fee_bps)
     else:
         broker = PaperBroker(cfg.crypto.exchange, cfg.crypto.fee_bps, cfg.crypto.slippage_bps)
 
-    state = StateStore(args.state or os.path.join(ROOT, "state.{}.json".format(broker.mode)))
+    if args.symbol:
+        cfg.crypto.symbol = args.symbol
+    # One state file per symbol, so several instances can run side by side
+    # without overwriting each other's positions.
+    default_state = "state.{}.{}.json".format(
+        broker.mode, cfg.crypto.symbol.replace("/", "").lower())
+    state = StateStore(args.state or os.path.join(ROOT, default_state))
     gate = load_gate(cfg, required=cfg.evidence.enabled and not args.no_evidence)
     portfolio, supervisor = load_account(cfg, state)
 
@@ -303,10 +313,27 @@ def cmd_balance(args, cfg) -> int:
 
 def cmd_status(args, cfg) -> int:
     mode = args.mode or cfg.crypto.mode
-    path = args.state or os.path.join(ROOT, "state.{}.json".format(mode))
-    if not os.path.exists(path):
-        print("No state file at {} -- the bot has not run in {} mode yet.".format(path, mode))
+    if args.state:
+        paths = [args.state]
+    else:
+        import glob
+        paths = sorted(glob.glob(os.path.join(ROOT, "state.{}*.json".format(mode))))
+    paths = [p for p in paths if os.path.exists(p)]
+    if not paths:
+        print("Nothing has run in {} mode yet.".format(mode))
         return 1
+    if len(paths) > 1:
+        print("{} instances running in {} mode".format(len(paths), mode))
+        print("=" * 60)
+    for index, path in enumerate(paths):
+        if index:
+            print("\n" + "-" * 60 + "\n")
+        print("[{}]".format(os.path.basename(path)))
+        _print_one_state(path, cfg, args)
+    return 0
+
+
+def _print_one_state(path, cfg, args) -> None:
     state = StateStore(path)
     portfolio, supervisor = load_account(cfg, state)
     now = int(time.time() * 1000)
@@ -905,6 +932,7 @@ def parse_args(argv=None):
     t.add_argument("--dry-run", action="store_true", help="decide and log, place no orders")
     t.add_argument("--poll", type=int, help="seconds between passes")
     t.add_argument("--state", help="path to the state file")
+    t.add_argument("--symbol", help="override the symbol; gets its own state file")
     t.add_argument("--skip-validation", action="store_true",
                    help="go live without a passing validation on record")
     t.add_argument("--no-evidence", action="store_true",
