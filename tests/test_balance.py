@@ -19,6 +19,10 @@ class StubBroker:
     def price_of(self, asset, quote="USDT"):
         return self._prices.get(asset)
 
+    def quote_prices(self, assets, quote="USDT"):
+        self.priced_in_one_call = True
+        return {a: self._prices[a] for a in assets if a in self._prices}
+
 
 def run(monkeypatch, capsys, holdings, mode="live", capital=400.0, prices=None):
     cfg = cli.load_config(cli.os.path.join(cli.ROOT, "config.yaml"))
@@ -31,6 +35,7 @@ def run(monkeypatch, capsys, holdings, mode="live", capital=400.0, prices=None):
 
     args = Args()
     args.mode = mode
+    args.top = 12
     code = cli.cmd_balance(args, cfg)
     return code, capsys.readouterr().out
 
@@ -79,3 +84,24 @@ def test_an_asset_with_no_market_is_listed_without_a_value(monkeypatch, capsys):
                     prices={"USDT": 1.0})
     assert "WEIRDCOIN" in out
     assert "n/a" in out
+
+
+def test_the_wallet_is_priced_in_a_single_request(monkeypatch, capsys):
+    """One ticker request per asset stalls for minutes on a funded testnet
+    account. The wallet must be priced in one call."""
+    holdings = {a: holding(1.0) for a in ("BTC", "ETH", "BNB", "LTC", "TRX", "USDT")}
+    prices = {"BTC": 80_000.0, "ETH": 2_400.0, "BNB": 600.0,
+              "LTC": 90.0, "TRX": 0.3, "USDT": 1.0}
+    broker = StubBroker(holdings, prices)
+    cfg = cli.load_config(cli.os.path.join(cli.ROOT, "config.yaml"))
+    monkeypatch.setattr(cli, "CcxtBroker", lambda *a, **k: broker)
+    monkeypatch.setattr(cfg.crypto.__class__, "has_credentials", lambda self: True)
+
+    class Args:
+        mode = "live"
+        top = 12
+
+    cli.cmd_balance(Args(), cfg)
+    assert getattr(broker, "priced_in_one_call", False)
+    out = capsys.readouterr().out
+    assert "80,000.00" in out and "2,400.00" in out

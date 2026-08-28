@@ -7,10 +7,13 @@ prove out on testnet is the code that runs with real money.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Dict, List, Optional
 
 from .data import fetch_ohlcv, make_exchange
 from .strategy import Candle
+
+log = logging.getLogger("trading.broker")
 
 
 @dataclass
@@ -44,6 +47,14 @@ class Broker:
 
     def balances(self) -> Dict[str, Dict[str, float]]:
         """Every asset with a non-zero balance: {asset: {free, used, total}}."""
+        raise NotImplementedError
+
+    def quote_prices(self, assets, quote: str = "USDT") -> Dict[str, float]:
+        """Price of each asset in `quote`, in ONE request.
+
+        Pricing a wallet one ticker at a time is a request per asset; a
+        pre-funded testnet account has enough of them to stall for minutes.
+        """
         raise NotImplementedError
 
 
@@ -93,6 +104,30 @@ class CcxtBroker(Broker):
             return self.price("{}/{}".format(asset, quote))
         except Exception:
             return None
+
+    def quote_prices(self, assets, quote: str = "USDT") -> Dict[str, float]:
+        out: Dict[str, float] = {quote: 1.0}
+        wanted = [a for a in assets if a != quote]
+        if not wanted:
+            return out
+        try:
+            self.exchange.load_markets()
+        except Exception:
+            pass
+        # Ask for everything rather than naming the symbols: a pre-funded
+        # testnet account holds hundreds of assets, and listing them all in the
+        # query string overruns the exchange's URL limits.
+        try:
+            tickers = self.exchange.fetch_tickers()
+        except Exception as exc:
+            log.warning("could not price the wallet (%s)", exc)
+            return out
+        for asset in wanted:
+            ticker = tickers.get("{}/{}".format(asset, quote)) or {}
+            last = ticker.get("last") or ticker.get("close")
+            if last:
+                out[asset] = float(last)
+        return out
 
     def market_buy(self, symbol: str, qty: float) -> Fill:
         return self._order(symbol, "buy", qty)
@@ -144,6 +179,9 @@ class PaperBroker(Broker):
             return self.price("{}/{}".format(asset, quote))
         except Exception:
             return None
+
+    def quote_prices(self, assets, quote: str = "USDT") -> Dict[str, float]:
+        return {quote: 1.0}
 
     def market_buy(self, symbol: str, qty: float) -> Fill:
         price = self.price(symbol) * (1.0 + self.slippage)

@@ -268,13 +268,14 @@ def cmd_balance(args, cfg) -> int:
         print("  empty -- nothing has been deposited yet")
         return 1
 
-    print("  {:<8} {:>16} {:>16}".format("asset", "free", "value in " + quote))
-    print("  " + "-" * 42)
-    total_value = 0.0
-    quote_free = 0.0
-    other_value = 0.0
-    for asset, amounts in sorted(holdings.items(), key=lambda kv: -kv[1]["total"]):
-        price = broker.price_of(asset, quote)
+    prices = broker.quote_prices(list(holdings), quote)   # one request, not one per asset
+
+    # Value everything, then show only what matters. A pre-funded testnet
+    # account holds hundreds of assets and printing them all is noise.
+    valued = []
+    total_value = quote_free = other_value = 0.0
+    for asset, amounts in holdings.items():
+        price = prices.get(asset)
         value = None if price is None else amounts["total"] * price
         if value is not None:
             total_value += value
@@ -282,8 +283,26 @@ def cmd_balance(args, cfg) -> int:
                 quote_free = amounts["free"]
             else:
                 other_value += value
+        valued.append((value if value is not None else -1.0, asset, amounts, value))
+    valued.sort(reverse=True)
+
+    dust_cutoff = max(1.0, total_value * 0.001)
+    # Anything we could not price is shown rather than hidden: an unknown
+    # holding might be the largest thing in the account.
+    unpriceable = [v for v in valued if v[3] is None]
+    material = [v for v in valued if v[3] is not None
+                and (v[3] >= dust_cutoff or v[1] == quote)]
+    shown = (material + unpriceable)[:args.top]
+    hidden = len(valued) - len(shown)
+
+    print("  {:<8} {:>16} {:>16}".format("asset", "free", "value in " + quote))
+    print("  " + "-" * 42)
+    for _, asset, amounts, value in shown:
         print("  {:<8} {:>16.8f} {:>16}".format(
             asset, amounts["free"], "n/a" if value is None else "{:,.2f}".format(value)))
+    if hidden > 0:
+        print("  {:<8} {:>16} {:>16}".format(
+            "+{} more".format(hidden), "", "below {:,.2f}".format(dust_cutoff)))
     print("  " + "-" * 42)
     print("  {:<8} {:>16} {:>16,.2f}".format("total", "", total_value))
 
@@ -943,6 +962,7 @@ def parse_args(argv=None):
 
     bal = sub.add_parser("balance", help="what is in the exchange account, and is it usable")
     bal.add_argument("--mode", help="paper, testnet or live (default: config)")
+    bal.add_argument("--top", type=int, default=12, help="how many holdings to list")
     bal.set_defaults(func=cmd_balance)
 
     st = sub.add_parser("status", help="portfolio, pauses and open positions")
