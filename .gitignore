@@ -17,3 +17,6 @@ logs/
 
 # Live account state -- positions, balances, pause timers.
 state*.json
+
+# Vercel CLI project link (machine-specific)
+web/.vercel/

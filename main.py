@@ -613,6 +613,83 @@ def _validation_blocks_live(cfg, max_age_days: float = 30.0):
     return None
 
 
+def cmd_publish(args, cfg) -> int:
+    """Write the snapshot the web dashboard reads.
+
+    Only what is safe to serve publicly: settings, the recorded validation
+    verdict, and portfolio totals. No keys, no order history, no addresses.
+    """
+    import glob
+
+    out = {
+        "generated_at": _now_iso(),
+        "mode": cfg.crypto.mode,
+        "exchange": cfg.crypto.exchange,
+        "timeframe": cfg.crypto.timeframe,
+        "settings": {
+            "capital": cfg.portfolio.initial_capital_usdt,
+            "position_pct": cfg.risk.max_position_size_pct,
+            "stop_pct": cfg.risk.stop_loss_pct,
+            "target_pct": cfg.risk.take_profit_pct,
+            "daily_loss_pct": cfg.risk.max_daily_loss_pct,
+            "max_drawdown_pct": cfg.portfolio.max_total_drawdown_pct,
+            "analogues": cfg.evidence.min_similar_situations,
+            "min_success_rate": cfg.evidence.min_success_rate,
+        },
+        "instances": [],
+        "validation": None,
+    }
+
+    path = _validation_path()
+    if os.path.exists(path):
+        with open(path) as fh:
+            v = json.load(fh)
+        out["validation"] = {
+            "at": v.get("at"), "passed": v.get("passed"),
+            "average_return_pct": v.get("average_return_pct"),
+            "worst_drawdown_pct": v.get("worst_drawdown_pct"),
+            "total_trades": v.get("total_trades"),
+            "windows": [{"symbol": w["symbol"], "return_pct": w["return_pct"],
+                         "trades": w["trades"]} for w in v.get("windows", [])],
+            "reasons": v.get("reasons", []),
+        }
+
+    for state_path in sorted(glob.glob(os.path.join(ROOT, "state.*.json"))):
+        try:
+            state = StateStore(state_path)
+        except (ValueError, OSError):
+            continue
+        portfolio, supervisor = load_account(cfg, state)
+        name = os.path.basename(state_path)[len("state."):-len(".json")]
+        out["instances"].append({
+            "name": name,
+            "equity": round(portfolio.equity, 2),
+            "allocated": round(portfolio.state.allocated, 2),
+            "reserve": round(portfolio.state.reserve, 2),
+            "growth_pct": round(portfolio.growth_pct, 2),
+            "trades": portfolio.state.trades,
+            "wins": portfolio.state.wins,
+            "losses": portfolio.state.losses,
+            "halted": portfolio.state.halted,
+            "paused_until_ms": supervisor.state.paused_until_ms,
+            "pause_reason": supervisor.state.pause_reason,
+            "open_positions": [
+                {"symbol": p.symbol, "qty": p.qty, "entry": p.entry_price,
+                 "stop": p.stop_price, "target": p.take_profit_price}
+                for p in state.positions
+            ],
+        })
+
+    target = args.out or os.path.join(ROOT, "web", "status.json")
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w") as fh:
+        json.dump(out, fh, indent=2)
+    print("Wrote {} ({} instance(s), validation {})".format(
+        target, len(out["instances"]),
+        "PASS" if (out["validation"] or {}).get("passed") else "FAIL/none"))
+    return 0
+
+
 def cmd_plan(args, cfg) -> int:
     p = cfg.portfolio
     r = cfg.risk
@@ -990,6 +1067,10 @@ def parse_args(argv=None):
                    help="share of windows that must be profitable (default 0.6)")
     v.add_argument("--no-evidence", action="store_true")
     v.set_defaults(func=cmd_validate)
+
+    pub = sub.add_parser("publish", help="write the snapshot the web dashboard reads")
+    pub.add_argument("--out", help="path for status.json")
+    pub.set_defaults(func=cmd_publish)
 
     pl = sub.add_parser("plan", help="what it will and will not do with your money")
     pl.set_defaults(func=cmd_plan)

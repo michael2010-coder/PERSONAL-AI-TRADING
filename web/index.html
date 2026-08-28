@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal AI Trading</title>
+<meta name="description" content="A rule-based crypto trading bot, and the evidence about whether it works.">
+<meta name="robots" content="noindex">
+<style>
+  :root{
+    --bg:#faf9f7; --panel:#fff; --line:#e6e2dc; --ink:#1a1a1a; --muted:#6b6660;
+    --accent:#1f6f4a; --warn:#9a5b1e; --bad:#a33228; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#141413;--panel:#1c1c1a;--line:#2e2d2a;--ink:#f0eee9;--muted:#9b958c;
+          --accent:#5bbd8b;--warn:#d99a4e;--bad:#e0705f;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;}
+  .wrap{max-width:860px;margin:0 auto;padding:48px 20px 80px}
+  header{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:32px}
+  h1{font-size:1.9rem;margin:0 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:0}
+  h2{font-size:1.05rem;text-transform:uppercase;letter-spacing:.08em;
+     color:var(--muted);margin:40px 0 14px;font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:14px}
+  .row{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px dashed var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .k{color:var(--muted)}
+  .row .v{font-family:var(--mono);text-align:right}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat .n{font-family:var(--mono);font-size:1.45rem;display:block;letter-spacing:-.02em}
+  .stat .l{color:var(--muted);font-size:.82rem}
+  .pill{display:inline-block;font-size:.75rem;font-weight:600;padding:3px 10px;border-radius:999px;
+        border:1px solid currentColor}
+  .ok{color:var(--accent)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .note{border-left:3px solid var(--warn);padding:2px 0 2px 16px;color:var(--muted);margin:18px 0}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.88rem}
+  th{text-align:left;color:var(--muted);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--line)}
+  td{padding:6px 8px;border-bottom:1px solid var(--line)}
+  td.num{text-align:right}
+  a{color:inherit}
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:.86rem}
+  .overflow{overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Personal AI Trading</h1>
+    <p class="sub">A rule-based crypto bot with a hard risk layer &mdash; and an honest account of whether it works.</p>
+  </header>
+
+  <div id="live"></div>
+
+  <h2>What it does</h2>
+  <div class="card">
+    <p style="margin:0 0 10px">Three indicators vote on every bar. Before any entry is allowed, the bot
+    searches <strong>1.5 million labelled historical situations</strong> for the ones most
+    similar to right now, and requires enough of them to have worked out.
+    Every order passes a risk manager that sets a stop and a target at entry.</p>
+    <p style="margin:0;color:var(--muted)">A supervisor pauses trading on losing streaks, bad weeks,
+    stale data, exchange errors and violent markets. Position size never grows
+    after a win, and profit is locked away in steps where the bot cannot reach it.</p>
+  </div>
+
+  <h2>Does it make money?</h2>
+  <div class="card">
+    <p style="margin:0 0 12px"><strong>Barely, and not enough to run.</strong> Measured on real Binance data,
+    the validated configuration returns about <strong>+0.24% a year</strong>. On a
+    400&nbsp;USDT account that is <strong>96 cents</strong>, against roughly $50&ndash;70 a year to host it.</p>
+    <div class="note">An 80% win rate was also built and tested, by moving the target closer to
+    the entry. It won 80.1% of 286 trades and <strong>lost 7.9%</strong> over the year. A win
+    rate is not an edge; expectancy is.</div>
+    <p style="margin:0;color:var(--muted)">The risk controls held throughout: worst single trade &minus;2.25%,
+    worst drawdown &minus;2.52% against a &minus;20% ceiling.</p>
+  </div>
+
+  <h2>Latest validation</h2>
+  <div id="validation" class="card"><span class="k">loading&hellip;</span></div>
+
+  <footer>
+    <p>The bot runs as a long-running process on its own machine; this page is a
+    published snapshot, not the trading loop. Source and full method:
+    <a href="https://github.com/michael2010-coder/PERSONAL-AI-TRADING">github.com/michael2010-coder/PERSONAL-AI-TRADING</a></p>
+    <p id="stamp"></p>
+  </footer>
+</div>
+
+<script>
+const pct = n => (n >= 0 ? "+" : "") + Number(n).toFixed(2) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+fetch("status.json?" + Date.now()).then(r => r.json()).then(d => {
+  const s = d.settings || {};
+  const totals = (d.instances || []).reduce((a, i) => {
+    a.trades += i.trades; a.wins += i.wins; a.open += i.open_positions.length;
+    a.paused += (i.paused_until_ms > Date.now()) ? 1 : 0; return a;
+  }, {trades:0, wins:0, open:0, paused:0});
+
+  document.getElementById("live").innerHTML = `
+    <div class="grid">
+      <div class="stat"><span class="n">${esc(d.mode)}</span><span class="l">mode</span></div>
+      <div class="stat"><span class="n">${(d.instances||[]).length}</span><span class="l">instances</span></div>
+      <div class="stat"><span class="n">${totals.trades}</span><span class="l">trades taken</span></div>
+      <div class="stat"><span class="n">${totals.open}</span><span class="l">open positions</span></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="row"><span class="k">Exchange</span><span class="v">${esc(d.exchange)} &middot; ${esc(d.timeframe)}</span></div>
+      <div class="row"><span class="k">Capital per instance</span><span class="v">${s.capital} USDT</span></div>
+      <div class="row"><span class="k">Per position</span><span class="v">${s.position_pct}% &rarr; stop &minus;${s.stop_pct}% / target +${s.target_pct}%</span></div>
+      <div class="row"><span class="k">Daily loss limit</span><span class="v">&minus;${s.daily_loss_pct}%</span></div>
+      <div class="row"><span class="k">Hard stop</span><span class="v">&minus;${s.max_drawdown_pct}% from peak</span></div>
+      <div class="row"><span class="k">Evidence required</span><span class="v">${Number(s.analogues).toLocaleString()} analogues at ${(s.min_success_rate*100).toFixed(0)}%</span></div>
+    </div>`;
+
+  const v = d.validation;
+  const el = document.getElementById("validation");
+  if (!v) { el.innerHTML = '<span class="pill bad">no validation on record</span>'; }
+  else {
+    const rows = (v.windows||[]).map(w =>
+      `<tr><td>${esc(w.symbol)}</td><td class="num ${w.return_pct>=0?'ok':'bad'}">${pct(w.return_pct)}</td><td class="num">${w.trades}</td></tr>`).join("");
+    el.innerHTML = `
+      <p style="margin:0 0 12px">
+        <span class="pill ${v.passed?'ok':'bad'}">${v.passed ? "PASS" : "FAIL"}</span>
+        <span style="color:var(--muted);margin-left:10px">${esc((v.at||"").slice(0,10))}</span>
+      </p>
+      <div class="row"><span class="k">Average return</span><span class="v ${v.average_return_pct>=0?'ok':'bad'}">${pct(v.average_return_pct)}</span></div>
+      <div class="row"><span class="k">Worst drawdown</span><span class="v">${pct(v.worst_drawdown_pct)}</span></div>
+      <div class="row"><span class="k">Trades</span><span class="v">${v.total_trades}</span></div>
+      <div class="overflow"><table style="margin-top:14px">
+        <tr><th>market</th><th style="text-align:right">return</th><th style="text-align:right">trades</th></tr>
+        ${rows}</table></div>
+      <p style="margin:14px 0 0;color:var(--muted);font-size:.88rem">
+        Passing is a necessary condition for going live, not a promise.</p>`;
+  }
+  document.getElementById("stamp").textContent = "Snapshot generated " + (d.generated_at || "unknown");
+}).catch(e => {
+  document.getElementById("live").innerHTML =
+    '<div class="card"><span class="bad">Could not load status.json</span></div>';
+});
+</script>
+</body>
+</html>
