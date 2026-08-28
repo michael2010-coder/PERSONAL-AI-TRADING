@@ -16,6 +16,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 
@@ -684,6 +685,20 @@ def cmd_publish(args, cfg) -> int:
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with open(target, "w") as fh:
         json.dump(out, fh, indent=2)
+
+    # This file carries balances and open positions. Vercel can be locked
+    # behind a login; a public git repository cannot, so refuse to leave it
+    # tracked rather than relying on anyone noticing.
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", target],
+        cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if tracked:
+        log.error("%s is tracked by git. It holds balances and open positions, "
+                  "and this repository is published. Run:\n"
+                  "  git rm --cached %s && echo web/status.json >> .gitignore",
+                  os.path.basename(target), target)
+        return 1
     print("Wrote {} ({} instance(s), validation {})".format(
         target, len(out["instances"]),
         "PASS" if (out["validation"] or {}).get("passed") else "FAIL/none"))

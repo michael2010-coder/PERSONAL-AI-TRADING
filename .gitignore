@@ -20,3 +20,4 @@ state*.json
 
 # Vercel CLI project link (machine-specific)
 web/.vercel/
+web/status.json
