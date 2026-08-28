@@ -54,6 +54,7 @@ class TradingEngine:
         if portfolio is not None:
             # Sizing follows the account, not a number frozen in a config file.
             self.risk.set_allocated(portfolio.state.allocated)
+            self.state.save_component("portfolio", portfolio.to_dict())
 
     # -- one pass --------------------------------------------------------
     def step(self) -> Signal:
@@ -199,6 +200,7 @@ class TradingEngine:
             opened_at=int(time.time() * 1000),
         )
         self.state.add_position(position)
+        self._persist_portfolio()   # so a restart mid-position sees the account
         self.state.record_pnl(-fill.fee, {
             "at": _now(), "event": "entry", "symbol": self.symbol, "qty": fill.qty,
             "price": fill.price, "fee": fill.fee,

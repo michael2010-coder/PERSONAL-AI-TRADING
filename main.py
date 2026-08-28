@@ -201,6 +201,21 @@ def cmd_trade(args, cfg) -> int:
     else:
         broker = PaperBroker(cfg.crypto.exchange, cfg.crypto.fee_bps, cfg.crypto.slippage_bps)
 
+    # Credentials preflight. Testnet and live use different keys under the
+    # same variable names, so the common mistake is running one with the
+    # other's keys. Fail with a sentence instead of a traceback.
+    if isinstance(broker, CcxtBroker):
+        try:
+            broker.balances()
+        except Exception as exc:
+            if "api-key" in str(exc).lower() or "authentication" in type(exc).__name__.lower():
+                log.error("%s rejected the API keys in .env for %s mode: %s",
+                          cfg.crypto.exchange, mode, str(exc)[:120])
+                log.error("Testnet keys (testnet.binance.vision) and live keys "
+                          "(binance.com) are different. Check which are in .env.")
+                return 2
+            log.warning("could not read the account up front (%s); continuing", str(exc)[:120])
+
     if args.symbol:
         cfg.crypto.symbol = args.symbol
     # One state file per symbol, so several instances can run side by side
