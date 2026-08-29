@@ -59,6 +59,7 @@ class Position:
     stop_price: float
     take_profit_price: float
     opened_at: int     # epoch ms
+    stop_order_id: Optional[str] = None   # resting stop on the exchange
 
     def notional(self, price: Optional[float] = None) -> float:
         return self.qty * (self.entry_price if price is None else price)

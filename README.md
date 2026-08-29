@@ -136,6 +136,19 @@ July 2026 cannot be justified by an analogue that was still open in July 2026.
 .venv/bin/python main.py status              # portfolio, pauses, open positions
 ```
 
+### The stop lives on the exchange
+
+An earlier version only checked the stop when the bot polled. That has two
+failure modes, both seen on testnet: price can move past the stop *between*
+polls (one overnight exit filled 3.5% below its trigger, losing 10x what the
+position was sized to lose), and a position is completely unprotected whenever
+the process is not running -- a crash, a deploy, a sleeping laptop.
+
+Every entry now rests a stop-loss order on the exchange itself. Verified by
+killing the bot with a position open: the stop stayed live on Binance. If the
+resting stop goes missing it is put back on the next poll, and it is cancelled
+before any exit the bot initiates itself.
+
 ### What it risks, at 400 USDT
 
 | | |

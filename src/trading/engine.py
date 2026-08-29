@@ -122,6 +122,7 @@ class TradingEngine:
         elif signal.action == SELL:
             reason = "signal"
         if reason is None:
+            self._ensure_stop(position)
             log.info("holding %s: %.6f @ %.2f (stop %.2f / target %.2f, unrealised %+.2f)",
                      position.symbol, position.qty, position.entry_price,
                      position.stop_price, position.take_profit_price,
@@ -133,6 +134,10 @@ class TradingEngine:
         if self.dry_run:
             log.info("[dry-run] would SELL %.6f %s (%s)", position.qty, position.symbol, reason)
             return
+        # Cancel the resting stop first, or the exchange still holds the coins
+        # and the sell is rejected for insufficient balance.
+        if position.stop_order_id:
+            self.broker.cancel(position.symbol, position.stop_order_id)
         fill: Fill = self.broker.market_sell(position.symbol, position.qty)
         pnl = (fill.price - position.entry_price) * fill.qty - fill.fee
         self.state.remove_position(position.symbol)
@@ -199,6 +204,16 @@ class TradingEngine:
             stop_price=levels["stop_price"], take_profit_price=levels["take_profit_price"],
             opened_at=int(time.time() * 1000),
         )
+        # Protection that survives this process dying.
+        position.stop_order_id = self.broker.place_stop(
+            self.symbol, fill.qty, position.stop_price)
+        if position.stop_order_id:
+            log.info("resting stop on the exchange at %.2f (order %s)",
+                     position.stop_price, position.stop_order_id)
+        else:
+            log.warning("no exchange-side stop for %s -- the position is only "
+                        "protected while this process is running", self.symbol)
+
         self.state.add_position(position)
         self._persist_portfolio()   # so a restart mid-position sees the account
         self.state.record_pnl(-fill.fee, {
@@ -276,6 +291,25 @@ class TradingEngine:
                        "lower_bound": verdict.lower_bound, "detail": verdict.reason,
                        "mode": self.broker.mode})
         return False
+
+    def _ensure_stop(self, position: Position) -> None:
+        """Re-rest the stop if it is missing -- it may have been filled,
+        cancelled by hand, or lost when the exchange reset."""
+        if self.dry_run:
+            return
+        live = self.broker.open_order_ids(position.symbol)
+        if position.stop_order_id and position.stop_order_id in live:
+            return
+        if position.stop_order_id and not live:
+            # Could not read the book; do not stack a second stop on a guess.
+            return
+        new_id = self.broker.place_stop(position.symbol, position.qty, position.stop_price)
+        if new_id:
+            log.info("re-rested a missing stop for %s at %.2f (order %s)",
+                     position.symbol, position.stop_price, new_id)
+            self.state.remove_position(position.symbol)
+            position.stop_order_id = new_id
+            self.state.add_position(position)
 
     def _start_cooldown(self) -> None:
         from .data import timeframe_ms

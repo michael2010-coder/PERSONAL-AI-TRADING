@@ -49,6 +49,21 @@ class Broker:
         """Every asset with a non-zero balance: {asset: {free, used, total}}."""
         raise NotImplementedError
 
+    def place_stop(self, symbol: str, qty: float, stop_price: float) -> Optional[str]:
+        """Rest a stop-loss on the exchange. Returns an order id, or None.
+
+        The bot's own stop only fires when it polls, so a crash or a sleeping
+        laptop leaves a position unprotected. This one lives on the exchange
+        and works whether or not the bot is running.
+        """
+        return None
+
+    def cancel(self, symbol: str, order_id: str) -> bool:
+        return False
+
+    def open_order_ids(self, symbol: str) -> List[str]:
+        return []
+
     def quote_prices(self, assets, quote: str = "USDT") -> Dict[str, float]:
         """Price of each asset in `quote`, in ONE request.
 
@@ -128,6 +143,37 @@ class CcxtBroker(Broker):
             if last:
                 out[asset] = float(last)
         return out
+
+    def place_stop(self, symbol: str, qty: float, stop_price: float) -> Optional[str]:
+        amount = float(self.exchange.amount_to_precision(symbol, qty))
+        trigger = float(self.exchange.price_to_precision(symbol, stop_price))
+        # A limit a little under the trigger: a pure limit at the trigger can
+        # be jumped in a fast drop, and Binance spot needs a limit price.
+        limit = float(self.exchange.price_to_precision(symbol, stop_price * 0.995))
+        try:
+            order = self.exchange.create_order(
+                symbol, "STOP_LOSS_LIMIT", "sell", amount, limit,
+                {"stopPrice": trigger, "timeInForce": "GTC"},
+            )
+            return str(order.get("id") or "")
+        except Exception as exc:
+            log.warning("could not rest a stop on the exchange for %s: %s", symbol, exc)
+            return None
+
+    def cancel(self, symbol: str, order_id: str) -> bool:
+        try:
+            self.exchange.cancel_order(order_id, symbol)
+            return True
+        except Exception as exc:
+            log.warning("could not cancel order %s on %s: %s", order_id, symbol, exc)
+            return False
+
+    def open_order_ids(self, symbol: str) -> List[str]:
+        try:
+            return [str(o["id"]) for o in self.exchange.fetch_open_orders(symbol)]
+        except Exception as exc:
+            log.warning("could not list open orders for %s: %s", symbol, exc)
+            return []
 
     def market_buy(self, symbol: str, qty: float) -> Fill:
         return self._order(symbol, "buy", qty)

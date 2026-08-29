@@ -249,3 +249,79 @@ def test_stale_market_data_stops_the_engine_trading(tmp_path):
     engine.step()
     assert broker.orders == []
     assert "stale" in engine.supervisor.state.pause_reason
+
+
+class StopAwareBroker(FakeBroker):
+    """FakeBroker that also models resting stop orders on the exchange."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.stops = {}
+        self.cancelled = []
+        self._seq = 0
+
+    def place_stop(self, symbol, qty, stop_price):
+        self._seq += 1
+        oid = "stop-{}".format(self._seq)
+        self.stops[oid] = {"symbol": symbol, "qty": qty, "stop": stop_price}
+        return oid
+
+    def cancel(self, symbol, order_id):
+        self.cancelled.append(order_id)
+        self.stops.pop(order_id, None)
+        return True
+
+    def open_order_ids(self, symbol):
+        return list(self.stops)
+
+
+def build_stopaware(tmp_path, candles, price):
+    from trading.portfolio import Portfolio, PortfolioParams
+    from trading.supervisor import Supervisor, SupervisorParams
+
+    engine, broker, state, portfolio, supervisor = build_account(tmp_path, candles, price)
+    stop_broker = StopAwareBroker(broker._candles, price)
+    engine.broker = stop_broker
+    return engine, stop_broker, state
+
+
+def test_entry_rests_a_stop_on_the_exchange(tmp_path):
+    """The bot's own stop dies with the process; this one does not."""
+    engine, broker, state = build_stopaware(tmp_path, buy_candles(), price=100.0)
+    engine.step()
+    assert broker.stops, "a protective stop must be resting on the exchange"
+    resting = list(broker.stops.values())[0]
+    assert resting["stop"] == pytest.approx(98.0)
+    assert state.positions[0].stop_order_id in broker.stops
+
+
+def test_the_resting_stop_is_cancelled_before_the_bot_sells(tmp_path):
+    """Leaving it would hold the coins and the sell would be rejected."""
+    engine, broker, state = build_stopaware(tmp_path, buy_candles(), price=105.0)
+    state.add_position(Position("BTC/USDT", "long", 1.0, 100.0, 98.0, 104.0, 0,
+                                stop_order_id="stop-existing"))
+    broker.stops["stop-existing"] = {"symbol": "BTC/USDT", "qty": 1.0, "stop": 98.0}
+    engine.step()
+    assert "stop-existing" in broker.cancelled
+    assert [o[0] for o in broker.orders] == ["sell"]
+
+
+def test_a_missing_stop_is_re_rested(tmp_path):
+    """A stop can be cancelled by hand or lost in an exchange reset."""
+    engine, broker, state = build_stopaware(tmp_path, buy_candles(), price=101.0)
+    state.add_position(Position("BTC/USDT", "long", 1.0, 100.0, 98.0, 104.0, 0,
+                                stop_order_id="gone"))
+    broker.stops["decoy"] = {"symbol": "BTC/USDT", "qty": 1.0, "stop": 98.0}
+    engine.step()
+    assert state.positions[0].stop_order_id in broker.stops
+    assert state.positions[0].stop_order_id != "gone"
+
+
+def test_it_does_not_stack_stops_when_the_book_cannot_be_read(tmp_path):
+    """If open orders come back empty because of an error, do not guess."""
+    engine, broker, state = build_stopaware(tmp_path, buy_candles(), price=101.0)
+    state.add_position(Position("BTC/USDT", "long", 1.0, 100.0, 98.0, 104.0, 0,
+                                stop_order_id="stop-1"))
+    broker.open_order_ids = lambda symbol: []      # simulate a failed read
+    engine.step()
+    assert broker.stops == {}, "must not rest a second stop on a failed read"
