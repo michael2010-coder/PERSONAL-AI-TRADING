@@ -637,8 +637,15 @@ def cmd_publish(args, cfg) -> int:
     """
     import glob
 
+    # Account details are OFF by default. The page is served from a host that
+    # cannot be locked without a paid plan, so the safe assumption is that
+    # anything published is public. Settings and validation are already in the
+    # README; balances and open positions are not.
+    include_account = bool(args.include_account)
+
     out = {
         "generated_at": _now_iso(),
+        "account_included": include_account,
         "mode": cfg.crypto.mode,
         "exchange": cfg.crypto.exchange,
         "timeframe": cfg.crypto.timeframe,
@@ -670,7 +677,8 @@ def cmd_publish(args, cfg) -> int:
             "reasons": v.get("reasons", []),
         }
 
-    for state_path in sorted(glob.glob(os.path.join(ROOT, "state.*.json"))):
+    for state_path in (sorted(glob.glob(os.path.join(ROOT, "state.*.json")))
+                       if include_account else []):
         try:
             state = StateStore(state_path)
         except (ValueError, OSError):
@@ -714,9 +722,14 @@ def cmd_publish(args, cfg) -> int:
                   "  git rm --cached %s && echo web/status.json >> .gitignore",
                   os.path.basename(target), target)
         return 1
-    print("Wrote {} ({} instance(s), validation {})".format(
-        target, len(out["instances"]),
+    print("Wrote {} ({}, validation {})".format(
+        target,
+        "{} instance(s)".format(len(out["instances"])) if include_account
+        else "no account data -- safe to publish",
         "PASS" if (out["validation"] or {}).get("passed") else "FAIL/none"))
+    if include_account:
+        print("WARNING: this snapshot contains balances and open positions. "
+              "Do not deploy it to a publicly reachable host.")
     return 0
 
 
@@ -1100,6 +1113,8 @@ def parse_args(argv=None):
 
     pub = sub.add_parser("publish", help="write the snapshot the web dashboard reads")
     pub.add_argument("--out", help="path for status.json")
+    pub.add_argument("--include-account", action="store_true",
+                     help="include balances and open positions (local viewing only)")
     pub.set_defaults(func=cmd_publish)
 
     pl = sub.add_parser("plan", help="what it will and will not do with your money")

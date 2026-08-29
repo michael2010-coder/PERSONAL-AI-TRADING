@@ -95,18 +95,23 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":
 
 fetch("status.json?" + Date.now()).then(r => r.json()).then(d => {
   const s = d.settings || {};
+  const acct = d.account_included && (d.instances || []).length;
   const totals = (d.instances || []).reduce((a, i) => {
-    a.trades += i.trades; a.wins += i.wins; a.open += i.open_positions.length;
-    a.paused += (i.paused_until_ms > Date.now()) ? 1 : 0; return a;
-  }, {trades:0, wins:0, open:0, paused:0});
+    a.trades += i.trades; a.open += i.open_positions.length; return a;
+  }, {trades:0, open:0});
+
+  const stats = acct
+    ? `<div class="stat"><span class="n">${esc(d.mode)}</span><span class="l">mode</span></div>
+       <div class="stat"><span class="n">${d.instances.length}</span><span class="l">instances</span></div>
+       <div class="stat"><span class="n">${totals.trades}</span><span class="l">trades taken</span></div>
+       <div class="stat"><span class="n">${totals.open}</span><span class="l">open positions</span></div>`
+    : `<div class="stat"><span class="n">${esc(d.mode)}</span><span class="l">mode</span></div>
+       <div class="stat"><span class="n">${esc(d.exchange)}</span><span class="l">exchange</span></div>
+       <div class="stat"><span class="n">${esc(d.timeframe)}</span><span class="l">timeframe</span></div>
+       <div class="stat"><span class="n">private</span><span class="l">account figures</span></div>`;
 
   document.getElementById("live").innerHTML = `
-    <div class="grid">
-      <div class="stat"><span class="n">${esc(d.mode)}</span><span class="l">mode</span></div>
-      <div class="stat"><span class="n">${(d.instances||[]).length}</span><span class="l">instances</span></div>
-      <div class="stat"><span class="n">${totals.trades}</span><span class="l">trades taken</span></div>
-      <div class="stat"><span class="n">${totals.open}</span><span class="l">open positions</span></div>
-    </div>
+    <div class="grid">${stats}</div>
     <div class="card" style="margin-top:14px">
       <div class="row"><span class="k">Exchange</span><span class="v">${esc(d.exchange)} &middot; ${esc(d.timeframe)}</span></div>
       <div class="row"><span class="k">Capital per instance</span><span class="v">${s.capital} USDT</span></div>
@@ -114,7 +119,10 @@ fetch("status.json?" + Date.now()).then(r => r.json()).then(d => {
       <div class="row"><span class="k">Daily loss limit</span><span class="v">&minus;${s.daily_loss_pct}%</span></div>
       <div class="row"><span class="k">Hard stop</span><span class="v">&minus;${s.max_drawdown_pct}% from peak</span></div>
       <div class="row"><span class="k">Evidence required</span><span class="v">${Number(s.analogues).toLocaleString()} analogues at ${(s.min_success_rate*100).toFixed(0)}%</span></div>
-    </div>`;
+    </div>
+    ${acct ? "" : `<p style="color:var(--muted);font-size:.88rem;margin:-4px 0 0">
+      Balances, positions and P&amp;L are deliberately not published. They stay on the
+      machine running the bot, readable with <code>main.py status</code>.</p>`}`;
 
   const v = d.validation;
   const el = document.getElementById("validation");
