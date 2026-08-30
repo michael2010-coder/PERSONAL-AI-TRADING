@@ -144,21 +144,56 @@ class CcxtBroker(Broker):
                 out[asset] = float(last)
         return out
 
+    def sell_price_floor(self, symbol: str) -> Optional[float]:
+        """The lowest price a resting sell may be placed at.
+
+        Binance's PERCENT_PRICE_BY_SIDE filter caps how far from the market a
+        limit order may sit (askMultiplierDown, typically 0.8 -- so 20% below).
+        A stop further out than that is simply rejected.
+        """
+        try:
+            market = self.exchange.market(symbol)
+            for f in (market.get("info") or {}).get("filters", []):
+                if f.get("filterType") == "PERCENT_PRICE_BY_SIDE":
+                    last = self.price(symbol)
+                    return last * float(f["askMultiplierDown"])
+        except Exception:
+            return None
+        return None
+
     def place_stop(self, symbol: str, qty: float, stop_price: float) -> Optional[str]:
         amount = float(self.exchange.amount_to_precision(symbol, qty))
         trigger = float(self.exchange.price_to_precision(symbol, stop_price))
-        # A limit a little under the trigger: a pure limit at the trigger can
-        # be jumped in a fast drop, and Binance spot needs a limit price.
-        limit = float(self.exchange.price_to_precision(symbol, stop_price * 0.995))
-        try:
-            order = self.exchange.create_order(
-                symbol, "STOP_LOSS_LIMIT", "sell", amount, limit,
-                {"stopPrice": trigger, "timeInForce": "GTC"},
-            )
-            return str(order.get("id") or "")
-        except Exception as exc:
-            log.warning("could not rest a stop on the exchange for %s: %s", symbol, exc)
-            return None
+
+        # A market stop first: it carries no limit price, so the exchange's
+        # limit-price filter does not apply, and it cannot be jumped in a fast
+        # drop the way a limit can.
+        attempts = [
+            ("STOP_LOSS", None, {"stopPrice": trigger}),
+            ("STOP_LOSS_LIMIT",
+             float(self.exchange.price_to_precision(symbol, stop_price * 0.995)),
+             {"stopPrice": trigger, "timeInForce": "GTC"}),
+        ]
+        last_error = None
+        for order_type, limit, params in attempts:
+            try:
+                order = self.exchange.create_order(symbol, order_type, "sell",
+                                                   amount, limit, params)
+                return str(order.get("id") or "")
+            except Exception as exc:
+                last_error = exc
+
+        floor = self.sell_price_floor(symbol)
+        if floor is not None and stop_price < floor:
+            log.warning(
+                "%s will not accept a stop at %.2f: a resting sell must sit above "
+                "%.2f (%.0f%% below the market). The stop is further out than the "
+                "exchange allows, so it stays enforced by this process until price "
+                "falls near enough to rest it.",
+                symbol, stop_price, floor, (1 - floor / self.price(symbol)) * 100)
+        else:
+            log.warning("could not rest a stop on the exchange for %s: %s", symbol, last_error)
+        return None
 
     def cancel(self, symbol: str, order_id: str) -> bool:
         try:

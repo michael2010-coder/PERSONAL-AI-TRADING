@@ -303,7 +303,20 @@ class TradingEngine:
         if position.stop_order_id and not live:
             # Could not read the book; do not stack a second stop on a guess.
             return
-        new_id = self.broker.place_stop(position.symbol, position.qty, position.stop_price)
+        # The stop may be further from the market than the exchange will accept
+        # a resting order (Binance caps it at 20% below). Retrying each poll is
+        # right -- it becomes placeable as price falls toward it -- but the
+        # warning should not repeat every pass.
+        now = time.time()
+        quiet = now - getattr(self, "_last_stop_warning", 0.0) < 3600
+        if quiet:
+            logging.getLogger("trading.broker").setLevel(logging.ERROR)
+        try:
+            new_id = self.broker.place_stop(position.symbol, position.qty, position.stop_price)
+        finally:
+            logging.getLogger("trading.broker").setLevel(logging.NOTSET)
+        if not new_id and not quiet:
+            self._last_stop_warning = now
         if new_id:
             log.info("re-rested a missing stop for %s at %.2f (order %s)",
                      position.symbol, position.stop_price, new_id)
