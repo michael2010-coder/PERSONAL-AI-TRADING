@@ -14,7 +14,7 @@ import yaml
 from .analogues import EvidenceParams
 from .portfolio import PortfolioParams
 from .risk import RiskParams
-from .strategy import StrategyParams
+from .strategy import Strategy, StrategyParams, TrendParams, TrendStrategy
 from .supervisor import SupervisorParams
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -72,6 +72,8 @@ class Config:
     crypto: CryptoConfig = field(default_factory=CryptoConfig)
     stocks: StocksConfig = field(default_factory=StocksConfig)
     strategy: StrategyParams = field(default_factory=StrategyParams)
+    strategy_kind: str = "votes"          # "votes" | "trend"
+    trend: TrendParams = field(default_factory=TrendParams)
     risk: RiskParams = field(default_factory=RiskParams)
     evidence: EvidenceParams = field(default_factory=EvidenceParams)
     portfolio: PortfolioParams = field(default_factory=PortfolioParams)
@@ -103,13 +105,25 @@ def load_config(path: Optional[str] = None) -> Config:
     cfg = Config(
         crypto=_section(raw, "crypto", CryptoConfig),
         stocks=_section(raw, "stocks", StocksConfig),
-        strategy=StrategyParams.from_dict(raw.get("strategy")),
+        strategy=StrategyParams.from_dict(
+            {k: v for k, v in (raw.get("strategy") or {}).items() if k != "kind"}),
+        strategy_kind=(raw.get("strategy") or {}).get("kind", "votes"),
+        trend=TrendParams.from_dict(raw.get("trend")),
         risk=RiskParams.from_dict(raw.get("risk")),
         evidence=EvidenceParams.from_dict(raw.get("evidence")),
         portfolio=PortfolioParams.from_dict(raw.get("portfolio")),
         supervisor=SupervisorParams.from_dict(raw.get("supervisor")),
         path=path,
     )
+    if cfg.strategy_kind not in ("votes", "trend"):
+        raise ValueError("strategy.kind must be votes or trend (got {!r})".format(cfg.strategy_kind))
     if cfg.crypto.mode not in ("testnet", "live", "paper"):
         raise ValueError("crypto.mode must be testnet, live or paper (got {!r})".format(cfg.crypto.mode))
     return cfg
+
+
+def make_strategy(cfg: Config):
+    """The strategy the config asks for."""
+    if cfg.strategy_kind == "trend":
+        return TrendStrategy(cfg.trend)
+    return Strategy(cfg.strategy)

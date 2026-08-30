@@ -121,3 +121,59 @@ def test_the_cached_and_uncached_paths_agree_exactly():
         assert fast.score == pytest.approx(slow.score)
         assert fast.votes == pytest.approx(slow.votes)
         assert fast.reasons == slow.reasons
+
+
+# -- trend following --------------------------------------------------------
+def trend_bars(prices, start=1_700_000_000_000, step=86_400_000):
+    return [Candle(start + i * step, p, p * 1.01, p * 0.99, p, 1000.0)
+            for i, p in enumerate(prices)]
+
+
+def test_trend_holds_while_above_the_average():
+    from trading.strategy import TrendParams, TrendStrategy
+    s = TrendStrategy(TrendParams(ma_days=20))
+    rising = [100.0 * (1.01 ** i) for i in range(60)]
+    signal = s.evaluate(trend_bars(rising))
+    assert signal.action == BUY
+    assert signal.indicators["gap_pct"] > 0
+
+
+def test_trend_stands_aside_below_the_average():
+    from trading.strategy import TrendParams, TrendStrategy
+    s = TrendStrategy(TrendParams(ma_days=20))
+    falling = [100.0 * (0.99 ** i) for i in range(60)]
+    assert s.evaluate(trend_bars(falling)).action == SELL
+
+
+def test_trend_waits_for_confirmation_before_flipping():
+    """A single spike through the average must not flip the position."""
+    from trading.strategy import TrendParams, TrendStrategy
+    prices = [100.0] * 40 + [104.0]          # one bar pokes above a flat average
+    strict = TrendStrategy(TrendParams(ma_days=20, confirm_bars=3))
+    assert strict.evaluate(trend_bars(prices)).action == HOLD
+    loose = TrendStrategy(TrendParams(ma_days=20, confirm_bars=1))
+    assert loose.evaluate(trend_bars(prices)).action == BUY
+
+
+def test_trend_holds_until_it_has_the_full_average():
+    from trading.strategy import TrendParams, TrendStrategy
+    s = TrendStrategy(TrendParams(ma_days=100))
+    assert s.evaluate(trend_bars([100.0] * 30)).action == HOLD
+    assert s.warmup_bars >= 101
+
+
+def test_trend_cache_matches_the_uncached_path():
+    from trading.strategy import TrendParams, TrendStrategy
+    s = TrendStrategy(TrendParams(ma_days=30))
+    candles = synthetic(bars=300, seed=8, drift=0.001, timeframe="1d")
+    cache = s.prepare(candles)
+    for i in range(s.warmup_bars, len(candles), 11):
+        assert s.evaluate(candles, i, cache=cache).action == s.evaluate(candles, i).action
+
+
+def test_trend_settings_are_validated():
+    from trading.strategy import TrendParams
+    with pytest.raises(ValueError):
+        TrendParams.from_dict({"ma_days": 1})
+    with pytest.raises(ValueError):
+        TrendParams.from_dict({"ma_dayz": 100})

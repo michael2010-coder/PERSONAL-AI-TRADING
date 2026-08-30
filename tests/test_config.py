@@ -213,3 +213,27 @@ def test_turning_the_evidence_gate_down_invalidates_the_pass(tmp_path, monkeypat
     _write_validation(tmp_path, monkeypatch, {"at": _passing()["at"], "passed": True,
                                               "reasons": [], "config": validated})
     assert "min_success_rate" in cli._validation_blocks_live(cfg)
+
+
+def test_the_trend_config_selects_the_trend_strategy():
+    from trading.config import make_strategy
+    from trading.strategy import TrendStrategy
+    cfg = load_config(os.path.join(cli.ROOT, "config.trend.yaml"))
+    assert cfg.strategy_kind == "trend"
+    assert isinstance(make_strategy(cfg), TrendStrategy)
+    assert cfg.trend.ma_days == 100
+
+
+def test_the_trend_drawdown_ceiling_clears_its_own_expected_drawdown():
+    """Measured drawdown is ~45%. A ceiling below that would halt the strategy
+    at the worst possible moment and lock the loss in."""
+    cfg = load_config(os.path.join(cli.ROOT, "config.trend.yaml"))
+    assert cfg.portfolio.max_total_drawdown_pct > 46.0
+
+
+def test_the_trend_config_does_not_take_profits_or_stop_for_the_day():
+    """Both would break a strategy whose entire edge is holding winners."""
+    cfg = load_config(os.path.join(cli.ROOT, "config.trend.yaml"))
+    assert cfg.risk.take_profit_pct >= 1000
+    assert cfg.supervisor.daily_profit_target_pct == 0
+    assert cfg.portfolio.compounding == "full"

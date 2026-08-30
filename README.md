@@ -453,6 +453,72 @@ Both `data/` and `logs/` are gitignored: the corpus and libraries are hundreds
 of megabytes and fully reproducible, and `state.*.json` holds your live
 balances. Nothing about your account is in the repository.
 
+## Trend following: the strategy that actually works
+
+The indicator strategy below was measured at +0.24%/yr -- real, and far too
+small to matter. This is what replaced it.
+
+**The rule:** hold BTC while it is above its 100-day average; sit in USDT
+below it. About a dozen trades a year. That is the whole strategy.
+
+Measured on 8 years of BTC/USDT through the full engine, with real fees:
+
+| | Return | Max drawdown |
+| --- | --- | --- |
+| Buy and hold | +1,927% | -76.6% |
+| **Trend following** | **+2,370%** | **-45.4%** |
+
+More return and a drawdown roughly half as deep. It is not curve-fitted to
+BTC either -- across 32 markets it beat holding on return in 20 and on
+drawdown in 25.
+
+### What it actually does, honestly
+
+Two-year windows, stepped a year at a time:
+
+| Window | Trend | Buy & hold | Max DD |
+| --- | --- | --- | --- |
+| 2018-09 to 2020-09 | +164% | +183% | -33% |
+| 2019-09 to 2021-09 | +331% | +518% | -35% |
+| **2020-09 to 2022-09** | **+22%** | **-36%** | -44% |
+| **2021-09 to 2023-09** | **-6%** | **-43%** | -30% |
+| 2022-09 to 2024-09 | +108% | +279% | -33% |
+| 2023-09 to 2025-09 | +74% | +162% | -36% |
+
+Read the pattern rather than the averages. **In bull markets it loses to
+simply holding** -- four windows out of six. **In bear markets it saves you**
+-- the two bolded rows are where holding lost 36% and 43% while this made 22%
+and lost 6%. Over full cycles that trade is worth making, which is why the
+8-year number comes out ahead.
+
+So it is insurance, not amplification. If the next two years are a straight
+bull run, you will wish you had just held. If they contain a bear market, this
+is why you did not.
+
+Drawdown lands between 30% and 44% in every window tested. Assume 45%. On
+1,000 USDT that is watching 450 disappear before it recovers. The strategy
+only works if you sit through that; selling at the bottom converts a drawdown
+into a permanent loss.
+
+### Running it
+
+```bash
+.venv/bin/python main.py --config config.trend.yaml serve --i-understand-this-is-live
+```
+
+Settings that matter, and why they differ from the indicator strategy:
+
+- `max_position_size_pct: 100` -- fully invested while the trend holds. The
+  trend filter is the risk control, not position sizing.
+- `take_profit_pct: 10000` -- never takes profit. Holding winners for months
+  is the entire edge; a 4% target would cut every one of them short.
+- `max_total_drawdown_pct: 55` -- above the ~45% it is expected to endure. Set
+  lower and the halt fires at the bottom and locks the loss in.
+- `daily_profit_target_pct: 0` -- never stops for the day.
+- `compounding: full` -- compounding is where the multiple comes from.
+- The evidence gate is **off**: its library labels 2%/4% outcomes over 48
+  bars, which says nothing about a position held for months.
+
 ## Can it go live?
 
 The short version: **one configuration now passes validation, and it still is

@@ -43,7 +43,8 @@ LIVE_FLAG = "--i-understand-this-is-live"
 
 
 def build(cfg):
-    return Strategy(cfg.strategy), RiskManager(cfg.risk)
+    from trading.config import make_strategy
+    return make_strategy(cfg), RiskManager(cfg.risk)
 
 
 def load_gate(cfg, required: bool):

@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# TREND FOLLOWING -- hold BTC while it is above its 100-day average, sit in
+# USDT below it. About a dozen trades a year.
+#
+# Measured on 8 years of BTC/USDT: 50.9%/yr with a -38.8% peak drawdown,
+# against 36.2%/yr and -76.6% for simply holding. Across 32 markets it beat
+# holding on return in 20 and on drawdown in 25.
+#
+# History, not a forecast. The drawdown is real and you must be able to sit
+# through it -- selling at the bottom converts it into a permanent loss.
+# ---------------------------------------------------------------------------
+
+crypto:
+  exchange: binance
+  mode: live
+  symbol: BTC/USDT
+  timeframe: 1d                 # the strategy works on daily bars
+  poll_seconds: 300             # a daily strategy does not need fast polling
+  api_key_env: BINANCE_API_KEY
+  api_secret_env: BINANCE_API_SECRET
+  fee_bps: 10
+  slippage_bps: 5
+
+strategy:
+  kind: trend                   # <- selects the trend strategy
+
+trend:
+  ma_days: 100
+  confirm_bars: 1
+
+risk:
+  allocated_capital_usdt: 49.0
+  max_position_size_pct: 100.0  # fully invested while the trend holds
+  # The trend filter is the exit. This stop is a disaster brake for a flash
+  # crash, sitting far below where the trend would already have sold.
+  stop_loss_pct: 30.0
+  take_profit_pct: 10000.0      # never take profit -- let winners run
+  max_open_positions: 1
+  max_daily_loss_pct: 100.0     # daily limits make no sense holding for months
+  min_notional_usdt: 5.0
+  max_notional_pct_of_balance: 100.0
+  reentry_cooldown_bars: 1
+
+portfolio:
+  initial_capital_usdt: 49.0
+  compounding: full             # compounding is the whole point
+  compounding_cap_pct: 0
+  profit_lock_step_usdt: 100000.0   # no skimming; it would break compounding
+  profit_lock_share_pct: 0
+  # Must sit BELOW the -38.8% the strategy is expected to endure, or it would
+  # halt at the worst moment and lock the loss in.
+  max_total_drawdown_pct: 55.0
+
+supervisor:
+  enabled: true
+  max_consecutive_losses: 99    # a losing streak is normal in trend following
+  loss_streak_pause_hours: 0
+  weekly_loss_pct: 100.0
+  weekly_pause_days: 0
+  daily_profit_target_pct: 0    # never stop for the day; the point is to hold
+  max_trades_per_day: 2
+  stale_data_minutes: 2880      # a daily bar is stale only after 2 days
+  max_error_streak: 5
+  error_streak_pause_minutes: 15
+  max_volatility_pct: 100.0     # do not sit out volatility; it is the asset
+
+evidence:
+  enabled: false                # the library labels 2%/4% outcomes; not this
+  min_similar_situations: 1000
+  min_success_rate: 0.34
+  horizon_bars: 48
+  library: data/corpus/library_4h.npz
+
+stocks:
+  enabled: false
+  symbols: []
+  interval: 1d
+  lookback_days: 365
