@@ -346,6 +346,73 @@ def cmd_balance(args, cfg) -> int:
     return 1
 
 
+def cmd_serve(args, cfg) -> int:
+    """Run the bot with a local control panel in front of it."""
+    from trading.webui import Controller, serve
+
+    strategy, risk = build(cfg)
+    mode = cfg.crypto.mode
+
+    if mode == "live":
+        if not args.i_understand_this_is_live:
+            log.error("config says mode: live but %s was not passed. Refusing.", LIVE_FLAG)
+            return 2
+        blocker = _validation_blocks_live(cfg)
+        if blocker and not args.skip_validation:
+            log.error("refusing to serve a live bot: %s", blocker)
+            return 2
+        broker = CcxtBroker(cfg.crypto.exchange, testnet=False,
+                            credentials=cfg.crypto.credentials(), fee_bps=cfg.crypto.fee_bps)
+    elif mode == "testnet":
+        broker = CcxtBroker(cfg.crypto.exchange, testnet=True,
+                            credentials=cfg.crypto.credentials(), fee_bps=cfg.crypto.fee_bps)
+    else:
+        broker = PaperBroker(cfg.crypto.exchange, cfg.crypto.fee_bps, cfg.crypto.slippage_bps)
+
+    if args.symbol:
+        cfg.crypto.symbol = args.symbol
+    state = StateStore(args.state or os.path.join(
+        ROOT, "state.{}.{}.json".format(broker.mode, cfg.crypto.symbol.replace("/", "").lower())))
+    portfolio, supervisor = load_account(cfg, state)
+    gate = load_gate(cfg, required=False)
+
+    engine = TradingEngine(cfg, broker, strategy, risk, state,
+                           dry_run=args.dry_run,
+                           journal_path=os.path.join(ROOT, "logs", "orders.jsonl"),
+                           evidence=gate, portfolio=portfolio, supervisor=supervisor)
+    controller = Controller(engine, cfg.crypto.poll_seconds,
+                            label="{} {}".format(broker.mode, cfg.crypto.symbol))
+
+    if args.host not in ("127.0.0.1", "localhost"):
+        log.warning("*** binding to %s exposes start/stop controls beyond this "
+                    "machine. Only do this behind a firewall or a VPN. ***", args.host)
+
+    server, token = serve(controller, args.host, args.port, args.token)
+    url = "http://{}:{}/?token={}".format(
+        "localhost" if args.host == "127.0.0.1" else args.host, args.port, token)
+
+    print()
+    print("Control panel: {}".format(url))
+    print("  mode: {}   symbol: {}   dry-run: {}".format(
+        broker.mode, cfg.crypto.symbol, args.dry_run))
+    print("  The panel is not the bot -- press Start on the page, or use --autostart.")
+    print("  Keep this token private; it can start and stop live trading.")
+    print()
+
+    if args.autostart:
+        controller.start()
+        print("Trading loop started automatically.")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nstopping ...")
+        controller.stop()
+        server.shutdown()
+    return 0
+
+
 def cmd_status(args, cfg) -> int:
     mode = args.mode or cfg.crypto.mode
     if args.state:
@@ -1084,6 +1151,19 @@ def parse_args(argv=None):
     bal.add_argument("--mode", help="paper, testnet or live (default: config)")
     bal.add_argument("--top", type=int, default=12, help="how many holdings to list")
     bal.set_defaults(func=cmd_balance)
+
+    sv = sub.add_parser("serve", help="run the bot with a local web control panel")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument("--token", help="fixed access token (generated if omitted)")
+    sv.add_argument("--symbol")
+    sv.add_argument("--state")
+    sv.add_argument("--dry-run", action="store_true")
+    sv.add_argument("--autostart", action="store_true",
+                    help="begin trading immediately instead of waiting for Start")
+    sv.add_argument("--skip-validation", action="store_true")
+    sv.add_argument(LIVE_FLAG, action="store_true")
+    sv.set_defaults(func=cmd_serve)
 
     st = sub.add_parser("status", help="portfolio, pauses and open positions")
     st.add_argument("--mode", help="which state file to read (paper/testnet/live)")

@@ -559,6 +559,30 @@ break and how to know when the run is finished:
 remains the 1h/80% setup, which is documented above and loses money -- it is
 kept because it is the honest record of what was asked for and what happened.
 
+## The control panel
+
+```bash
+.venv/bin/python main.py --config config.testnet.yaml serve --symbol BTC/USDT
+```
+
+Prints a URL with a token. The page shows equity, open positions (and whether
+each one has a stop resting on the exchange), today's trades, the last signal
+and any pause, and has Start and Stop buttons for the trading loop.
+
+It binds to **127.0.0.1** and requires the token, so it is reachable only from
+the machine running the bot. To reach it from your phone or laptop while the
+bot is on a server, tunnel rather than expose it:
+
+```bash
+ssh -L 8787:localhost:8787 user@your-vps
+```
+
+**It is deliberately not on the public site.** A page that can start and stop
+live trading must not be reachable by anyone who finds the URL, and the
+published site has no login. The panel holds the keys because it runs in the
+same process that already has them; putting that on a public host would turn
+a leaked URL into a leaked account.
+
 ## Funding it with BTC
 
 **The bot never holds your money.** There is no deposit address here, no
