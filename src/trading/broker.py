@@ -16,6 +16,36 @@ from .strategy import Candle
 log = logging.getLogger("trading.broker")
 
 
+def public_ip(timeout: float = 6.0) -> Optional[str]:
+    """This machine's outbound address, for the -2015 message."""
+    try:
+        import requests
+        return requests.get("https://api.ipify.org", timeout=timeout).text.strip()
+    except Exception:
+        return None
+
+
+def explain_auth_error(exc: Exception, exchange_id: str) -> Optional[str]:
+    """Turn Binance's -2015 into something actionable.
+
+    It means key, IP or permissions -- and on a home connection it is almost
+    always the IP, because consumer ISPs rotate the outbound address. Naming
+    the current one saves a round of guesswork.
+    """
+    text = str(exc)
+    if "-2015" not in text and "Invalid API-key" not in text:
+        return None
+    ip = public_ip()
+    lines = ["{} rejected the request (-2015: key, IP or permissions).".format(exchange_id)]
+    if ip:
+        lines.append("This machine is currently coming from {}.".format(ip))
+        lines.append("If that address is not on the key's IP whitelist, add it: "
+                     "API Management -> Edit restrictions -> IP access restrictions.")
+        lines.append("Home connections rotate between several addresses, so this "
+                     "will recur until the bot runs somewhere with a fixed IP.")
+    return " ".join(lines)
+
+
 @dataclass
 class Fill:
     symbol: str

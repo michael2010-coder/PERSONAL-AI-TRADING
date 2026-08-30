@@ -106,7 +106,12 @@ class TradingEngine:
                 log.info("stopped by user")
                 raise
             except Exception as exc:  # a bad poll must not kill a running bot
-                log.exception("pass failed, retrying next poll: %s", exc)
+                from .broker import explain_auth_error
+                hint = explain_auth_error(exc, self.cfg.crypto.exchange)
+                if hint:
+                    log.error("%s", hint)
+                else:
+                    log.exception("pass failed, retrying next poll: %s", exc)
                 if self.supervisor is not None:
                     self.supervisor.record_error(int(time.time() * 1000))
                     self._persist_supervisor()

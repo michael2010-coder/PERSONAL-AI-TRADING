@@ -72,8 +72,13 @@ class Controller:
                 if self.engine.supervisor is not None:
                     self.engine.supervisor.record_ok()
             except Exception as exc:                      # keep the loop alive
-                self.last_error = str(exc)[:200]
-                log.exception("pass failed: %s", exc)
+                from .broker import explain_auth_error
+                hint = explain_auth_error(exc, self.engine.cfg.crypto.exchange)
+                self.last_error = hint or str(exc)[:200]
+                if hint:
+                    log.error("%s", hint)
+                else:
+                    log.exception("pass failed: %s", exc)
                 if self.engine.supervisor is not None:
                     self.engine.supervisor.record_error(int(time.time() * 1000))
             self.passes += 1
@@ -286,7 +291,18 @@ async function refresh(){
           <span class="v">${p.qty.toFixed(6)} @ ${money(p.entry)} · stop ${money(p.stop)}
           ${p.protected?"✓ on exchange":"⚠ bot-only"}</span></div>`).join("")
       : `<div class="row"><span class="k">Open positions</span><span class="v">none</span></div>`;
-  }catch(e){ q("#sub").textContent = "error: " + e.message; }
+  }catch(e){
+    const dead = /failed to fetch|networkerror|load failed/i.test(e.message);
+    q("#sub").innerHTML = dead
+      ? '<span style="color:var(--bad)">The bot process is not running.</span> '
+        + 'Everything below is the last known state, not live. '
+        + 'Restart it in your terminal, then reload this page.'
+      : "error: " + e.message;
+    if (dead) {
+      q("#state").innerHTML = '<span class="dot off"></span>process gone';
+      q("#start").disabled = true; q("#stop").disabled = true;
+    }
+  }
 }
 q("#start").onclick = async()=>{ await api("/api/start","POST"); refresh(); };
 q("#stop").onclick  = async()=>{ await api("/api/stop","POST");  refresh(); };
