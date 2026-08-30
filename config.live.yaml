@@ -5,7 +5,8 @@
 #   4. the evidence gate agreeing, trade by trade
 #
 # Settings are identical to config.4h.yaml, which is the validated one.
-# Measured expectation: about +0.24%/yr. On 400 USDT that is 96 cents.
+# Sized for a 49 USDT account: 20% positions (9.80) to clear Binance's ~5 USDT
+# minimum, 0.20 at risk per trade. Measured expectation ~+0.24%/yr = ~12 cents.
 # ---------------------------------------------------------------------------
 # Trading behaviour. Secrets live in .env, never here.
 # Read README.md "Going live" before changing crypto.mode.
@@ -26,14 +27,14 @@ risk:
   # Kept in step with portfolio.initial_capital_usdt below. Once the bot is
   # running, the portfolio is the source of truth: sizing follows the trading
   # balance as it grows or shrinks.
-  allocated_capital_usdt: 400.0   # the only money this bot may ever touch
-  max_position_size_pct: 10.0     # per position, as % of allocated capital
+  allocated_capital_usdt: 49.0   # the only money this bot may ever touch
+  max_position_size_pct: 20.0     # per position, as % of allocated capital
   stop_loss_pct: 2.0              # set at entry, on every position
   take_profit_pct: 4.0
   max_open_positions: 1
   max_daily_loss_pct: 5.0         # trips the kill-switch until UTC midnight
   reentry_cooldown_bars: 3        # sit out this many bars after closing a position
-  min_notional_usdt: 10.0         # exchange minimum
+  min_notional_usdt: 5.0          # Binance BTC/USDT minimum is 5 USDT
   max_notional_pct_of_balance: 100.0
 
 strategy:
@@ -57,10 +58,10 @@ strategy:
 # where the bot cannot reach it.
 # ---------------------------------------------------------------------------
 portfolio:
-  initial_capital_usdt: 400.0
+  initial_capital_usdt: 49.0
   compounding: capped           # off | capped | full
   compounding_cap_pct: 50.0     # trading balance may grow to 600, no further
-  profit_lock_step_usdt: 50.0   # every +50 realised ...
+  profit_lock_step_usdt: 10.0   # every +50 realised ...
   profit_lock_share_pct: 50.0   # ... 25 moves to the untouchable reserve
   max_total_drawdown_pct: 20.0  # -20% from peak equity stops trading for good
 
