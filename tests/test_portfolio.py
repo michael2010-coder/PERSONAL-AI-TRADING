@@ -130,3 +130,24 @@ def test_bad_settings_are_refused():
         PortfolioParams(max_total_drawdown_pct=0).validate()
     with pytest.raises(ValueError):
         PortfolioParams.from_dict({"initial_capital": 400})
+
+
+def test_state_saved_for_a_different_account_size_is_discarded():
+    """Resizing 400 -> 49 must not carry the old balance across; that reports
+    money the account does not have and a fictional growth figure."""
+    big = Portfolio(PortfolioParams(initial_capital_usdt=400.0))
+    big.on_trade_closed(12.0)
+    saved = big.to_dict()
+
+    small = Portfolio.from_dict(PortfolioParams(initial_capital_usdt=49.0), saved)
+    assert small.state.allocated == pytest.approx(49.0)
+    assert small.state.trades == 0
+    assert small.growth_pct == pytest.approx(0.0)
+
+
+def test_state_saved_for_the_same_size_is_kept():
+    p = Portfolio(PortfolioParams(initial_capital_usdt=49.0))
+    p.on_trade_closed(3.0)
+    revived = Portfolio.from_dict(PortfolioParams(initial_capital_usdt=49.0), p.to_dict())
+    assert revived.state.trades == 1
+    assert revived.state.allocated == pytest.approx(52.0)

@@ -37,6 +37,7 @@ class Controller:
         self.last_pass_at = 0.0
         self.passes = 0
         self.last_signal = ""
+        self._wallet = {"free": None, "total": None, "at": 0.0}
 
     # -- lifecycle -------------------------------------------------------
     @property
@@ -80,6 +81,25 @@ class Controller:
             self._stop.wait(self.poll_seconds)
         log.info("trading loop stopped")
 
+    def _wallet_snapshot(self, quote: str, max_age_s: float = 30.0) -> dict:
+        """The real exchange balance, cached so the page does not hammer the API.
+
+        The portfolio below is the bot's own ledger of what it is allowed to
+        trade. This is the money that is actually in the account.
+        """
+        if time.time() - self._wallet["at"] < max_age_s:
+            return self._wallet
+        try:
+            balances = self.engine.broker.balances()
+            held = balances.get(quote) or {}
+            self._wallet = {"free": round(float(held.get("free") or 0.0), 2),
+                            "total": round(float(held.get("total") or 0.0), 2),
+                            "at": time.time()}
+        except Exception as exc:
+            log.debug("wallet read failed: %s", exc)
+            self._wallet = {"free": None, "total": None, "at": time.time()}
+        return self._wallet
+
     # -- what the page shows ---------------------------------------------
     def snapshot(self) -> dict:
         engine = self.engine
@@ -98,9 +118,15 @@ class Controller:
             mins = (supervisor.state.paused_until_ms - now_ms) / 60000.0
             paused_for = "{} ({:.0f} min left)".format(supervisor.state.pause_reason, mins)
 
+        quote = engine.symbol.split("/")[-1]
+        wallet = self._wallet_snapshot(quote)
+
         return {
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "running": self.running,
+            "quote": quote,
+            "wallet_free": wallet["free"],
+            "wallet_total": wallet["total"],
             "mode": engine.broker.mode,
             "symbol": engine.symbol,
             "timeframe": engine.timeframe,
@@ -246,7 +272,9 @@ async function refresh(){
     q("#err").textContent = d.halted ? "HALTED: " + d.halt_reason
       : (d.paused ? "Paused: " + d.paused : (d.last_error ? "Last error: " + d.last_error : ""));
     q("#acct").innerHTML = `
-      <div class="row"><span class="k">Equity</span><span class="v">${money(d.equity)}</span></div>
+      <div class="row"><span class="k">In your ${d.quote} wallet</span><span class="v">${
+        d.wallet_free==null ? "unreadable" : money(d.wallet_free) + " free"}</span></div>
+      <div class="row"><span class="k">Equity (bot ledger)</span><span class="v">${money(d.equity)}</span></div>
       <div class="row"><span class="k">Trading balance</span><span class="v">${money(d.allocated)}</span></div>
       <div class="row"><span class="k">Locked reserve</span><span class="v">${money(d.reserve)}</span></div>
       <div class="row"><span class="k">Growth</span><span class="v">${d.growth_pct==null?"—":d.growth_pct+"%"}</span></div>

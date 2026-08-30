@@ -70,6 +70,7 @@ class PortfolioState:
     halted: bool = False
     halt_reason: str = ""
     started_at: Optional[int] = None
+    initial_capital: float = 0.0   # what the account was sized for when saved
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -83,6 +84,7 @@ class Portfolio:
             state = PortfolioState(
                 allocated=params.initial_capital_usdt,
                 peak_equity=params.initial_capital_usdt,
+                initial_capital=params.initial_capital_usdt,
             )
         self.state = state
 
@@ -184,10 +186,25 @@ class Portfolio:
 
     @classmethod
     def from_dict(cls, params: PortfolioParams, raw: Optional[Dict]) -> "Portfolio":
+        """Restore saved state -- unless it was saved for a different account size.
+
+        Resizing the account (say 400 -> 49) leaves a state file describing the
+        old one. Carrying it over reports a balance the account does not have
+        and a growth figure that is pure fiction, so start fresh instead.
+        """
         if not raw:
             return cls(params)
         known = {f for f in PortfolioState.__dataclass_fields__}  # type: ignore[attr-defined]
-        return cls(params, PortfolioState(**{k: v for k, v in raw.items() if k in known}))
+        state = PortfolioState(**{k: v for k, v in raw.items() if k in known})
+        saved_for = state.initial_capital or 0.0
+        if abs(saved_for - params.initial_capital_usdt) > 1e-9:
+            import logging
+            logging.getLogger("trading.portfolio").warning(
+                "saved account was sized for %.2f, config now says %.2f -- "
+                "starting the ledger fresh (%d old trade(s) stay in logs/orders.jsonl)",
+                saved_for, params.initial_capital_usdt, state.trades)
+            return cls(params)
+        return cls(params, state)
 
     def summary(self) -> str:
         s = self.state
