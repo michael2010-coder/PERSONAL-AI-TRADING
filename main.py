@@ -717,6 +717,10 @@ def cmd_publish(args, cfg) -> int:
         "mode": cfg.crypto.mode,
         "exchange": cfg.crypto.exchange,
         "timeframe": cfg.crypto.timeframe,
+        "strategy": cfg.strategy_kind,
+        "trend": ({"ma_days": cfg.trend.ma_days,
+                   "confirm_bars": cfg.trend.confirm_bars}
+                  if cfg.strategy_kind == "trend" else None),
         "settings": {
             "capital": cfg.portfolio.initial_capital_usdt,
             "position_pct": cfg.risk.max_position_size_pct,
@@ -726,6 +730,7 @@ def cmd_publish(args, cfg) -> int:
             "max_drawdown_pct": cfg.portfolio.max_total_drawdown_pct,
             "analogues": cfg.evidence.min_similar_situations,
             "min_success_rate": cfg.evidence.min_success_rate,
+            "evidence_enabled": cfg.evidence.enabled,
         },
         "instances": [],
         "validation": None,
@@ -741,7 +746,10 @@ def cmd_publish(args, cfg) -> int:
             "worst_drawdown_pct": v.get("worst_drawdown_pct"),
             "total_trades": v.get("total_trades"),
             "windows": [{"symbol": w["symbol"], "return_pct": w["return_pct"],
-                         "trades": w["trades"]} for w in v.get("windows", [])],
+                         "trades": w["trades"],
+                         "buy_hold_pct": w.get("buy_hold_pct"),
+                         "win_rate_pct": w.get("win_rate_pct"),
+                         "bars": w.get("bars")} for w in v.get("windows", [])],
             "reasons": v.get("reasons", []),
         }
 

@@ -56,27 +56,10 @@
   <div id="live"></div>
 
   <h2>What it does</h2>
-  <div class="card">
-    <p style="margin:0 0 10px">Three indicators vote on every bar. Before any entry is allowed, the bot
-    searches <strong>1.5 million labelled historical situations</strong> for the ones most
-    similar to right now, and requires enough of them to have worked out.
-    Every order passes a risk manager that sets a stop and a target at entry.</p>
-    <p style="margin:0;color:var(--muted)">A supervisor pauses trading on losing streaks, bad weeks,
-    stale data, exchange errors and violent markets. Position size never grows
-    after a win, and profit is locked away in steps where the bot cannot reach it.</p>
-  </div>
+  <div id="what" class="card"><span class="k">loading&hellip;</span></div>
 
   <h2>Does it make money?</h2>
-  <div class="card">
-    <p style="margin:0 0 12px"><strong>Barely, and not enough to run.</strong> Measured on real Binance data,
-    the validated configuration returns about <strong>+0.24% a year</strong>. On a
-    400&nbsp;USDT account that is <strong>96 cents</strong>, against roughly $50&ndash;70 a year to host it.</p>
-    <div class="note">An 80% win rate was also built and tested, by moving the target closer to
-    the entry. It won 80.1% of 286 trades and <strong>lost 7.9%</strong> over the year. A win
-    rate is not an edge; expectancy is.</div>
-    <p style="margin:0;color:var(--muted)">The risk controls held throughout: worst single trade &minus;2.25%,
-    worst drawdown &minus;2.52% against a &minus;20% ceiling.</p>
-  </div>
+  <div id="money" class="card"><span class="k">loading&hellip;</span></div>
 
   <h2>Latest validation</h2>
   <div id="validation" class="card"><span class="k">loading&hellip;</span></div>
@@ -115,14 +98,56 @@ fetch("status.json?" + Date.now()).then(r => r.json()).then(d => {
     <div class="card" style="margin-top:14px">
       <div class="row"><span class="k">Exchange</span><span class="v">${esc(d.exchange)} &middot; ${esc(d.timeframe)}</span></div>
       <div class="row"><span class="k">Capital per instance</span><span class="v">${s.capital} USDT</span></div>
-      <div class="row"><span class="k">Per position</span><span class="v">${s.position_pct}% &rarr; stop &minus;${s.stop_pct}% / target +${s.target_pct}%</span></div>
+      <div class="row"><span class="k">Per position</span><span class="v">${s.position_pct}% &rarr; stop &minus;${s.stop_pct}% / ${s.target_pct >= 1000 ? "no target" : "target +" + s.target_pct + "%"}</span></div>
       <div class="row"><span class="k">Daily loss limit</span><span class="v">&minus;${s.daily_loss_pct}%</span></div>
       <div class="row"><span class="k">Hard stop</span><span class="v">&minus;${s.max_drawdown_pct}% from peak</span></div>
-      <div class="row"><span class="k">Evidence required</span><span class="v">${Number(s.analogues).toLocaleString()} analogues at ${(s.min_success_rate*100).toFixed(0)}%</span></div>
+      ${s.evidence_enabled === false
+        ? `<div class="row"><span class="k">Evidence gate</span><span class="v">off</span></div>`
+        : `<div class="row"><span class="k">Evidence required</span><span class="v">${Number(s.analogues).toLocaleString()} analogues at ${(s.min_success_rate*100).toFixed(0)}%</span></div>`}
+      ${d.strategy === "trend" && d.trend
+        ? `<div class="row"><span class="k">Rule</span><span class="v">close &gt; ${d.trend.ma_days}-bar average, ${d.trend.confirm_bars} bar(s) confirm</span></div>`
+        : ``}
     </div>
     ${acct ? "" : `<p style="color:var(--muted);font-size:.88rem;margin:-4px 0 0">
       Balances, positions and P&amp;L are deliberately not published. They stay on the
       machine running the bot, readable with <code>main.py status</code>.</p>`}`;
+
+  const trend = d.strategy === "trend";
+  document.getElementById("what").innerHTML = trend
+    ? `<p style="margin:0 0 10px">Long-horizon trend following on <strong>daily</strong> bars. It buys when the
+       close sits above its <strong>${(d.trend||{}).ma_days || 100}-day average</strong>, holds while it stays
+       there, and sells when it falls back below. There is <strong>no profit target</strong> &mdash; the exit
+       comes from the trend rather than a fixed number, so winners are allowed to run for months.</p>
+       <p style="margin:0;color:var(--muted)">It trades about a dozen times a year, not hundreds. The historical-analogue
+       gate is switched off for this strategy: it labels short-horizon outcomes, which say nothing about a
+       position held for months. A stop still sits under every entry, and a supervisor halts trading on
+       stale data and repeated exchange errors.</p>`
+    : `<p style="margin:0 0 10px">Three indicators vote on every bar. Before any entry is allowed, the bot
+       searches <strong>1.5 million labelled historical situations</strong> for the ones most similar to right
+       now, and requires enough of them to have worked out. Every order passes a risk manager that sets a
+       stop and a target at entry.</p>
+       <p style="margin:0;color:var(--muted)">A supervisor pauses trading on losing streaks, bad weeks, stale data,
+       exchange errors and violent markets. Position size never grows after a win.</p>`;
+
+  const w0 = ((d.validation||{}).windows || [])[0] || {};
+  const bh = w0.buy_hold_pct, ret = (d.validation||{}).average_return_pct;
+  const beat = (typeof bh === "number" && typeof ret === "number") ? ret - bh : null;
+  document.getElementById("money").innerHTML = !d.validation
+    ? `<p style="margin:0"><strong>No validation on record.</strong></p>`
+    : `<p style="margin:0 0 12px"><strong>The backtest says yes; live trading has not said anything yet.</strong>
+       Measured on real Binance daily data${w0.bars ? " over " + Number(w0.bars).toLocaleString() + " bars" : ""},
+       it returned <strong>${pct(ret)}</strong>${typeof bh === "number"
+         ? ` against <strong>${pct(bh)}</strong> for simply holding BTC and doing nothing`
+         : ""}${beat !== null ? ` &mdash; an edge of ${pct(beat)} over buy-and-hold, across only
+       ${d.validation.total_trades} trades` : ""}.</p>
+       <div class="note">Read the drawdown before the return. The worst peak-to-trough fall in that test was
+       <strong>${pct(d.validation.worst_drawdown_pct)}</strong>${typeof w0.win_rate_pct === "number"
+         ? `, and only <strong>${w0.win_rate_pct.toFixed(0)}%</strong> of trades were winners` : ""}.
+       Trend following pays through a few large winners and a long tail of small losses; a run of red is the
+       normal case, not a malfunction.</div>
+       <p style="margin:0;color:var(--muted)">These are <strong>simulated</strong> results over past data, not live
+       performance. A backtest cannot be slipped, front-run or rate-limited, and passing one is a necessary
+       condition for going live &mdash; not a promise. Live balances and P&amp;L are deliberately not published.</p>`;
 
   const v = d.validation;
   const el = document.getElementById("validation");
@@ -142,7 +167,7 @@ fetch("status.json?" + Date.now()).then(r => r.json()).then(d => {
         <tr><th>market</th><th style="text-align:right">return</th><th style="text-align:right">trades</th></tr>
         ${rows}</table></div>
       <p style="margin:14px 0 0;color:var(--muted);font-size:.88rem">
-        Passing is a necessary condition for going live, not a promise.</p>`;
+        Backtest over past data, replayed bar by bar with fees and slippage charged.</p>`;
   }
   document.getElementById("stamp").textContent = "Snapshot generated " + (d.generated_at || "unknown");
 }).catch(e => {
