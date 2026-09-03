@@ -45,8 +45,12 @@ portfolio:
   initial_capital_usdt: 49.0
   compounding: full             # compounding is the whole point
   compounding_cap_pct: 0
-  profit_lock_step_usdt: 100000.0   # no skimming; it would break compounding
-  profit_lock_share_pct: 0
+  # Every +10 USDT of realised profit, half of that step stops being
+  # tradeable. This is a deliberate trade against full compounding: it
+  # earns less over time, and takes winnings out of reach of the next
+  # losing streak. The reserve only ever ratchets up.
+  profit_lock_step_usdt: 10.0
+  profit_lock_share_pct: 50
   # Must sit BELOW the -38.8% the strategy is expected to endure, or it would
   # halt at the worst moment and lock the loss in.
   max_total_drawdown_pct: 55.0
