@@ -51,6 +51,12 @@ portfolio:
   # losing streak. The reserve only ever ratchets up.
   profit_lock_step_usdt: 10.0
   profit_lock_share_pct: 50
+  # Money paid into the exchange wallet joins the trading balance on the
+  # next poll but one. Only turn this on if that wallet holds nothing but
+  # this bot's money -- it cannot tell a deliberate top-up from USDT you
+  # parked there for something else, and it will trade both.
+  auto_deposit: true
+  min_deposit_usdt: 10.0
   # Must sit BELOW the -38.8% the strategy is expected to endure, or it would
   # halt at the worst moment and lock the loss in.
   max_total_drawdown_pct: 55.0

@@ -30,6 +30,10 @@ class PortfolioParams:
     profit_lock_share_pct: float = 50.0  # ... move half of that step to the reserve
     max_total_drawdown_pct: float = 20.0  # of peak equity: trading stops, permanently
     withdraw_reserve: bool = True        # reserve is never traded
+    # Top-ups. Off by default: sweeping whatever happens to be sitting in the
+    # wallet into a trading balance is not a thing to do without being asked.
+    auto_deposit: bool = False           # let wallet top-ups grow the trading balance
+    min_deposit_usdt: float = 10.0       # below this it is fee drift, not a deposit
 
     @classmethod
     def from_dict(cls, raw: Optional[Dict]) -> "PortfolioParams":
@@ -53,6 +57,8 @@ class PortfolioParams:
             raise ValueError("profit_lock_share_pct must be between 0 and 100")
         if self.profit_lock_step_usdt <= 0:
             raise ValueError("profit_lock_step_usdt must be positive")
+        if self.min_deposit_usdt <= 0:
+            raise ValueError("min_deposit_usdt must be positive")
         if not 0 < self.max_total_drawdown_pct <= 100:
             raise ValueError("max_total_drawdown_pct must be in (0, 100]")
 
@@ -71,6 +77,7 @@ class PortfolioState:
     halt_reason: str = ""
     started_at: Optional[int] = None
     initial_capital: float = 0.0   # what the account was sized for when saved
+    deposited: float = 0.0         # external capital added since, never earned
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -94,8 +101,18 @@ class Portfolio:
         return self.state.allocated + self.state.reserve
 
     @property
+    def basis(self) -> float:
+        """Everything put in: what it started with, plus every top-up since.
+
+        Growth is measured against this rather than the starting balance.
+        Money added is not money earned, and counting a deposit as profit
+        would report a return the account never made.
+        """
+        return self.p.initial_capital_usdt + self.state.deposited
+
+    @property
     def growth_pct(self) -> float:
-        start = self.p.initial_capital_usdt
+        start = self.basis
         return (self.equity - start) / start * 100.0
 
     @property
@@ -113,12 +130,33 @@ class Portfolio:
     # -- the ceiling on trading capital ----------------------------------
     def allocation_ceiling(self) -> float:
         if self.p.compounding == "off":
-            return self.p.initial_capital_usdt
+            return self.basis
         if self.p.compounding == "full":
             return float("inf")
-        return self.p.initial_capital_usdt * (1.0 + self.p.compounding_cap_pct / 100.0)
+        return self.basis * (1.0 + self.p.compounding_cap_pct / 100.0)
 
     # -- events ----------------------------------------------------------
+    def on_deposit(self, amount: float, when_ms: Optional[int] = None) -> Dict:
+        """Add external capital to the trading balance.
+
+        The peak rises with the deposit. Without that, paying money into an
+        account that is down would erase the drawdown on paper and switch the
+        drawdown ceiling off exactly when it is doing its job.
+
+        A halt is not lifted here. Trading stops on a drawdown breach and
+        starting again is a deliberate manual act; a transfer is not consent.
+        """
+        if amount <= 0:
+            raise ValueError("deposit must be positive")
+        state = self.state
+        if state.started_at is None:
+            state.started_at = when_ms
+        state.allocated += amount
+        state.deposited += amount
+        state.peak_equity += amount
+        return {"deposited": amount, "allocated": state.allocated,
+                "basis": self.basis, "equity": self.equity, "halted": state.halted}
+
     def on_trade_closed(self, pnl: float, when_ms: Optional[int] = None) -> Dict:
         """Book a closed trade and apply the compounding and profit-lock rules."""
         state = self.state
@@ -211,6 +249,7 @@ class Portfolio:
         lines = [
             "Portfolio",
             "  started with       {:>10.2f}".format(self.p.initial_capital_usdt),
+            "  topped up          {:>10.2f}   (basis {:.2f})".format(s.deposited, self.basis),
             "  trading balance    {:>10.2f}".format(s.allocated),
             "  locked reserve     {:>10.2f}   (never traded)".format(s.reserve),
             "  equity             {:>10.2f}   ({:+.2f}%)".format(self.equity, self.growth_pct),

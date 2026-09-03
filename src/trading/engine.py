@@ -45,6 +45,7 @@ class TradingEngine:
         self.risk = risk
         self.state = state
         self.dry_run = dry_run
+        self._pending_deposit: Optional[float] = None   # a top-up awaiting confirmation
         self.journal_path = journal_path
         self.evidence = evidence
         self.portfolio = portfolio
@@ -57,6 +58,57 @@ class TradingEngine:
             self.state.save_component("portfolio", portfolio.to_dict())
 
     # -- one pass --------------------------------------------------------
+    def _reconcile_deposits(self) -> None:
+        """Notice money added to the wallet and put it to work.
+
+        The wallet should hold exactly the part of the account that is not in
+        a position: the trading balance plus the locked reserve, less whatever
+        is committed to open positions. Anything above that came from outside,
+        because trading cannot make that number go up on its own -- proceeds
+        from a sale are already booked into `allocated` before this runs.
+
+        A rise is only believed when a second poll still sees it. A balance
+        read a moment after a fill, or between the two halves of an order,
+        settles by the next one.
+        """
+        if self.portfolio is None or not self.portfolio.p.auto_deposit or self.dry_run:
+            return
+        try:
+            free = self.broker.free_quote_balance(self.symbol)
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("could not read balance for the top-up check: %s", exc)
+            self._pending_deposit = None
+            return
+        if free is None:
+            return
+
+        committed = sum(pos.notional() for pos in self.state.positions)
+        expected = self.portfolio.state.allocated + self.portfolio.state.reserve - committed
+        excess = free - expected
+        if excess < self.portfolio.p.min_deposit_usdt:
+            self._pending_deposit = None
+            return
+
+        if self._pending_deposit is None:
+            self._pending_deposit = excess
+            log.info("wallet is %.2f USDT above the ledger; confirming on the next "
+                     "poll before adding it to the trading balance", excess)
+            return
+
+        # Bank only what both polls agreed on, so a balance still settling
+        # cannot talk the account into a larger number than really arrived.
+        amount = min(self._pending_deposit, excess)
+        self._pending_deposit = None
+        book = self.portfolio.on_deposit(amount)
+        self._persist_portfolio()
+        if not self.portfolio.state.halted:
+            self.risk.set_allocated(max(self.portfolio.state.allocated, 1e-6))
+        log.info("TOP-UP +%.2f USDT: trading balance now %.2f, basis %.2f. "
+                 "It is used at the next entry; an open position is not added to.",
+                 amount, book["allocated"], book["basis"])
+        self._journal({"event": "deposit", "amount": amount,
+                       "allocated": book["allocated"], "mode": self.broker.mode})
+
     def step(self) -> Signal:
         history_days = self._history_days()
         candles = self.broker.candles(self.symbol, self.timeframe, history_days)
@@ -69,6 +121,7 @@ class TradingEngine:
         signal = self.strategy.evaluate(candles)
         price = self.broker.price(self.symbol)
         self._last_candles = candles
+        self._reconcile_deposits()
 
         open_position = self._open_position()
         if open_position is not None:
