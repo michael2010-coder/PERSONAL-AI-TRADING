@@ -12,6 +12,10 @@ Documentation=https://github.com/michael2010-coder/PERSONAL-AI-TRADING
 After=network-online.target
 Wants=network-online.target
 
+# StartLimit* belong in [Unit]; systemd ignores them in [Service].
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=trader
@@ -25,8 +29,6 @@ ExecStart=/opt/personal-ai-trading/.venv/bin/python /opt/personal-ai-trading/mai
 # exchange. StartLimit stops an endless crash loop.
 Restart=always
 RestartSec=30
-StartLimitIntervalSec=600
-StartLimitBurst=5
 
 # A restart must not lose an open position: state lives in state.<mode>.json
 # and is reloaded on boot. Give it time to finish a poll before killing it.
