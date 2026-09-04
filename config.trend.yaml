@@ -57,6 +57,11 @@ portfolio:
   # parked there for something else, and it will trade both.
   auto_deposit: true
   min_deposit_usdt: 10.0
+  # A top-up paid in BTC is sold for USDT so the bot can spend it. This places
+  # a real market order and pays a fee, and it cannot tell a top-up from BTC
+  # you are holding on purpose -- it sells anything in the wallet beyond the
+  # open position.
+  auto_convert_base: true
   # Must sit BELOW the -38.8% the strategy is expected to endure, or it would
   # halt at the worst moment and lock the loss in.
   max_total_drawdown_pct: 55.0

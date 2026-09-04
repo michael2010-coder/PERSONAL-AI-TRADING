@@ -33,6 +33,9 @@ class PortfolioParams:
     # Top-ups. Off by default: sweeping whatever happens to be sitting in the
     # wallet into a trading balance is not a thing to do without being asked.
     auto_deposit: bool = False           # let wallet top-ups grow the trading balance
+    # Selling a top-up paid in the traded asset. Separate from auto_deposit and
+    # far heavier: this places a real market order, which auto_deposit never does.
+    auto_convert_base: bool = False      # sell BTC paid in, so it becomes spendable
     min_deposit_usdt: float = 10.0       # below this it is fee drift, not a deposit
 
     @classmethod

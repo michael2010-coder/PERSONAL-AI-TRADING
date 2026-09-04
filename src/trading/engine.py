@@ -46,6 +46,7 @@ class TradingEngine:
         self.state = state
         self.dry_run = dry_run
         self._pending_deposit: Optional[float] = None   # a top-up awaiting confirmation
+        self._pending_convert: Optional[float] = None   # base-asset dust awaiting a sale
         self.journal_path = journal_path
         self.evidence = evidence
         self.portfolio = portfolio
@@ -58,6 +59,58 @@ class TradingEngine:
             self.state.save_component("portfolio", portfolio.to_dict())
 
     # -- one pass --------------------------------------------------------
+    def _convert_base_deposits(self, price: float) -> None:
+        """Sell a top-up paid in the traded asset, so it becomes spendable.
+
+        The open position is held in that same asset, so the only safe amount
+        to sell is whatever the wallet holds beyond it. The position size comes
+        from the ledger, which records the entry quantity *before* the fee the
+        exchange took out of it -- so the surplus is always understated by that
+        fee, and the sale leans away from the position rather than into it.
+
+        The amount is shaved again before sending. Rounding an order up to the
+        exchange's lot size could cross the small margin above and sell part of
+        the trade; leaving dust behind costs nothing and cannot.
+        """
+        if self.portfolio is None or not self.portfolio.p.auto_convert_base or self.dry_run:
+            return
+        try:
+            free = self.broker.free_base_balance(self.symbol)
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("could not read the %s balance: %s", self.symbol.split("/")[0], exc)
+            self._pending_convert = None
+            return
+        if free is None:
+            return
+
+        held = sum(pos.qty for pos in self.state.positions)
+        excess = free - held
+        floor = max(self.portfolio.p.min_deposit_usdt, self.risk.p.min_notional_usdt)
+        if excess <= 0 or excess * price < floor:
+            self._pending_convert = None
+            return
+
+        base = self.symbol.split("/")[0]
+        if self._pending_convert is None:
+            self._pending_convert = excess
+            log.info("wallet holds %.8f %s beyond the open position (%.2f USDT); "
+                     "confirming on the next poll before selling it", excess, base, excess * price)
+            return
+
+        qty = min(self._pending_convert, excess) * 0.998      # leave dust, never the position
+        self._pending_convert = None
+        if qty * price < floor:
+            return
+        try:
+            fill = self.broker.market_sell(self.symbol, qty)
+        except Exception as exc:                              # noqa: BLE001
+            log.error("could not convert %s to %s: %s", base, self.symbol.split("/")[-1], exc)
+            return
+        log.info("CONVERTED %.8f %s -> %.2f USDT at %.2f. It is banked as a top-up "
+                 "on the next poll but one.", fill.qty, base, fill.qty * fill.price, fill.price)
+        self._journal({"event": "convert", "symbol": self.symbol, "qty": fill.qty,
+                       "price": fill.price, "fee": fill.fee, "mode": self.broker.mode})
+
     def _reconcile_deposits(self) -> None:
         """Notice money added to the wallet and put it to work.
 
@@ -121,6 +174,8 @@ class TradingEngine:
         signal = self.strategy.evaluate(candles)
         price = self.broker.price(self.symbol)
         self._last_candles = candles
+        # Convert first: a sale here becomes quote balance the next check banks.
+        self._convert_base_deposits(price)
         self._reconcile_deposits()
 
         open_position = self._open_position()

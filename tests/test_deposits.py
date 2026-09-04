@@ -84,8 +84,9 @@ def test_a_deposit_must_be_positive():
 class WalletBroker(Broker):
     mode = "fake"
 
-    def __init__(self, candles, price, balance):
+    def __init__(self, candles, price, balance, base=0.0):
         self._candles, self._price, self.balance = candles, price, balance
+        self.base, self.sold = base, []
 
     def candles(self, symbol, timeframe, days):
         return self._candles
@@ -96,20 +97,26 @@ class WalletBroker(Broker):
     def free_quote_balance(self, symbol):
         return self.balance
 
+    def free_base_balance(self, symbol):
+        return self.base
+
     def market_buy(self, symbol, qty):
         return Fill(symbol, "buy", qty, self._price, 0.0, "b1")
 
     def market_sell(self, symbol, qty):
+        self.sold.append(qty)
+        self.base -= qty
+        self.balance += qty * self._price
         return Fill(symbol, "sell", qty, self._price, 0.0, "s1")
 
 
-def build(tmp_path, balance, portfolio=None, **cfg_overrides):
+def build(tmp_path, balance, portfolio=None, base=0.0, **cfg_overrides):
     cfg = Config(crypto=CryptoConfig(symbol="BTC/USDT", timeframe="1h", mode="paper"))
     cfg.risk = RiskParams(allocated_capital_usdt=1000.0, max_position_size_pct=10.0,
                           stop_loss_pct=2.0, take_profit_pct=4.0, max_open_positions=1,
                           max_daily_loss_pct=5.0, min_notional_usdt=10.0)
     portfolio = portfolio or make(initial_capital_usdt=1000.0)
-    broker = WalletBroker(synthetic(bars=300, seed=5), 100.0, balance)
+    broker = WalletBroker(synthetic(bars=300, seed=5), 100.0, balance, base=base)
     state = StateStore(os.path.join(str(tmp_path), "state.json"))
     engine = TradingEngine(cfg, broker, Strategy(cfg.strategy), RiskManager(cfg.risk),
                            state, journal_path=os.path.join(str(tmp_path), "orders.jsonl"),
@@ -183,3 +190,81 @@ def test_the_step_loop_runs_the_check(tmp_path):
     engine.step()
     engine.step()
     assert pf.state.deposited == pytest.approx(500.0)
+
+
+# -- converting a top-up paid in the traded asset ---------------------------
+
+def convert_pf(**kw):
+    return make(initial_capital_usdt=1000.0, auto_convert_base=True, **kw)
+
+
+def held_position(engine, qty, entry=100.0):
+    from trading.risk import Position
+    engine.state.add_position(Position(symbol="BTC/USDT", side="long", qty=qty,
+                                       entry_price=entry, stop_price=entry * 0.7,
+                                       take_profit_price=entry * 100,
+                                       opened_at=0))
+
+
+def test_it_sells_only_what_is_beyond_the_open_position(tmp_path):
+    """The position is held in the same asset. Selling into it would close
+    part of a live trade to bank a deposit."""
+    engine, broker, _ = build(tmp_path, balance=0.0, portfolio=convert_pf(), base=3.0)
+    held_position(engine, qty=2.0)                # 2 of the 3 coins are the trade
+    engine._convert_base_deposits(100.0)
+    engine._convert_base_deposits(100.0)
+    assert len(broker.sold) == 1
+    assert broker.sold[0] <= 1.0                  # never more than the surplus
+    assert broker.base >= 2.0                     # the position survives intact
+
+
+def test_a_conversion_is_only_made_on_a_second_look(tmp_path):
+    engine, broker, _ = build(tmp_path, balance=0.0, portfolio=convert_pf(), base=1.0)
+    engine._convert_base_deposits(100.0)
+    assert broker.sold == []
+    engine._convert_base_deposits(100.0)
+    assert len(broker.sold) == 1
+
+
+def test_nothing_is_sold_when_the_wallet_only_holds_the_position(tmp_path):
+    engine, broker, _ = build(tmp_path, balance=0.0, portfolio=convert_pf(), base=2.0)
+    held_position(engine, qty=2.0)
+    engine._convert_base_deposits(100.0)
+    engine._convert_base_deposits(100.0)
+    assert broker.sold == []
+
+
+def test_the_ledger_quantity_leans_away_from_the_position(tmp_path):
+    """The ledger records the entry before its fee, so the wallet holds slightly
+    less than it says. The surplus must come out understated, not over."""
+    engine, broker, _ = build(tmp_path, balance=0.0, portfolio=convert_pf(), base=2.99938)
+    held_position(engine, qty=2.0)                # wallet really holds 0.99938 spare
+    engine._convert_base_deposits(100.0)
+    engine._convert_base_deposits(100.0)
+    assert broker.sold[0] < 0.99938
+    assert broker.base > 2.0
+
+
+def test_dust_is_left_alone(tmp_path):
+    engine, broker, _ = build(tmp_path, balance=0.0, portfolio=convert_pf(), base=0.05)
+    engine._convert_base_deposits(100.0)          # 5 USDT, under the 10 floor
+    engine._convert_base_deposits(100.0)
+    assert broker.sold == []
+
+
+def test_conversion_is_off_unless_asked_for(tmp_path):
+    engine, broker, _ = build(tmp_path, balance=0.0,
+                              portfolio=make(initial_capital_usdt=1000.0), base=5.0)
+    engine._convert_base_deposits(100.0)
+    engine._convert_base_deposits(100.0)
+    assert broker.sold == []
+
+
+def test_the_proceeds_are_then_banked_as_a_top_up(tmp_path):
+    """Sell, then the deposit check picks the USDT up on later polls."""
+    pf = convert_pf()
+    engine, broker, _ = build(tmp_path, balance=1000.0, portfolio=pf, base=1.0)
+    for _ in range(4):
+        engine._convert_base_deposits(100.0)
+        engine._reconcile_deposits()
+    assert broker.sold and pf.state.deposited > 90.0     # ~1 coin at 100, less dust

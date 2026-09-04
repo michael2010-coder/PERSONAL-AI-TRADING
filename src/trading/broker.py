@@ -69,6 +69,10 @@ class Broker:
     def free_quote_balance(self, symbol: str) -> Optional[float]:
         raise NotImplementedError
 
+    def free_base_balance(self, symbol: str) -> Optional[float]:
+        """Free units of the traded asset itself -- the BTC in BTC/USDT."""
+        raise NotImplementedError
+
     def market_buy(self, symbol: str, qty: float) -> Fill:
         raise NotImplementedError
 
@@ -126,6 +130,12 @@ class CcxtBroker(Broker):
         quote = symbol.split("/")[-1].split(":")[0]
         balance = self.exchange.fetch_balance()
         free = balance.get("free", {}).get(quote)
+        return None if free is None else float(free)
+
+    def free_base_balance(self, symbol: str) -> Optional[float]:
+        base = symbol.split("/")[0]
+        balance = self.exchange.fetch_balance()
+        free = balance.get("free", {}).get(base)
         return None if free is None else float(free)
 
     def balances(self) -> Dict[str, Dict[str, float]]:
@@ -279,6 +289,9 @@ class PaperBroker(Broker):
 
     def free_quote_balance(self, symbol: str) -> Optional[float]:
         return self.balance
+
+    def free_base_balance(self, symbol: str) -> Optional[float]:
+        return 0.0        # paper money holds no coin between trades
 
     def balances(self) -> Dict[str, Dict[str, float]]:
         return {"USDT": {"free": self.balance, "used": 0.0, "total": self.balance}}
