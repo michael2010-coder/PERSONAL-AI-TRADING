@@ -57,11 +57,12 @@ portfolio:
   # parked there for something else, and it will trade both.
   auto_deposit: true
   min_deposit_usdt: 10.0
-  # A top-up paid in BTC is sold for USDT so the bot can spend it. This places
-  # a real market order and pays a fee, and it cannot tell a top-up from BTC
-  # you are holding on purpose -- it sells anything in the wallet beyond the
-  # open position.
-  auto_convert_base: true
+  # A top-up paid in BTC could be sold for USDT so the bot can spend it, but
+  # that places a real market order, pays a fee, and cannot tell a top-up from
+  # BTC held on purpose -- it would sell anything in the wallet beyond the open
+  # position. Binance Convert does the same job by hand, free, in ten seconds.
+  # The code is kept and tested; this is the switch, not the capability.
+  auto_convert_base: false
   # Must sit BELOW the -38.8% the strategy is expected to endure, or it would
   # halt at the worst moment and lock the loss in.
   max_total_drawdown_pct: 55.0
