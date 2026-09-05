@@ -28,6 +28,30 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 API = "https://api.binance.com/api/v3"
+
+
+def _ssh_env():
+    """The environment `ssh` needs to know who is running it.
+
+    A process detached from the login session can lose HOME and USER, and
+    ssh then fails with "No user exists for uid N" before it ever opens a
+    socket. Resolve it once at startup, while the answer is still available,
+    and hand it to every child explicitly rather than hoping it inherits.
+    """
+    env = dict(os.environ)
+    try:
+        import pwd
+        pw = pwd.getpwuid(os.getuid())
+        env.setdefault("HOME", pw.pw_dir)
+        env.setdefault("USER", pw.pw_name)
+        env.setdefault("LOGNAME", pw.pw_name)
+    except Exception:                                  # noqa: BLE001
+        pass
+    env.setdefault("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+    return env
+
+
+SSH_ENV = _ssh_env()
 STATE = {"data": None, "error": None, "at": 0}
 LOCK = threading.Lock()
 
@@ -43,7 +67,7 @@ def read_remote_state(args):
         ["ssh", "-i", args.key, "-o", "StrictHostKeyChecking=no",
          "-o", "ConnectTimeout=10", "-o", "BatchMode=yes",
          "{}@{}".format(args.user, args.host), "cat " + args.state],
-        capture_output=True, text=True, timeout=40)
+        capture_output=True, text=True, timeout=40, env=SSH_ENV)
     if out.returncode != 0:
         raise RuntimeError((out.stderr or "ssh failed").strip().splitlines()[-1])
     return json.loads(out.stdout)
@@ -57,7 +81,7 @@ def service_health(args):
          "{}@{}".format(args.user, args.host),
          "systemctl is-active {0}; systemctl show {0} "
          "-p ActiveEnterTimestamp -p NRestarts --value".format(args.service)],
-        capture_output=True, text=True, timeout=40)
+        capture_output=True, text=True, timeout=40, env=SSH_ENV)
     lines = [l for l in out.stdout.splitlines() if l.strip()]
     return {"active": lines[0] if lines else "unknown",
             "since": lines[1] if len(lines) > 1 else "",
@@ -142,6 +166,8 @@ def poller(args):
             with LOCK:
                 STATE.update(data=data, error=None, at=time.time())
         except Exception as exc:                       # noqa: BLE001
+            # Keep the last good reading. A dashboard that blanks itself on
+            # one failed poll tells you less than a stale number does.
             with LOCK:
                 STATE.update(error="{}: {}".format(type(exc).__name__, exc),
                              at=time.time())
@@ -196,6 +222,7 @@ td:first-child{text-align:left}
 </style></head><body><div class=wrap>
 <h1>Live trading</h1>
 <p class=sub id=sub>connecting&hellip;</p>
+<div id=warn></div>
 <div id=main></div>
 
 <h2>BTC/USDT daily &mdash; and the line the bot decides on</h2>
@@ -316,11 +343,14 @@ async function tick(){
   let d;
   try{ d=await (await fetch("data.json?"+Date.now())).json(); }
   catch(e){ document.getElementById("sub").textContent="dashboard unreachable"; return; }
-  if(d.error){
+  const s=d.data;
+  if(d.error && !s){
     document.getElementById("main").innerHTML=`<div class="card"><span class="bad">Could not read the bot: ${esc(d.error)}</span></div>`;
     document.getElementById("sub").textContent="error"; return;
   }
-  const s=d.data; if(!s) return; LAST=s;
+  if(!s) return; LAST=s;
+  document.getElementById("warn").innerHTML = d.error
+    ? `<div class="card"><span class="warn">Last poll failed (${esc(d.error)}). Showing the reading from ${esc(s.at)}.</span></div>` : "";
   const p=s.position, live=s.health.active==="active";
   document.getElementById("sub").innerHTML=
     `<span class="pill ${live?'ok':'bad'}">${live?'RUNNING':esc(s.health.active).toUpperCase()}</span>`+
